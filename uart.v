@@ -58,6 +58,7 @@ module uart
    wire                 rst4;                   // From uartrx_i of uartrx_m.v
    wire                 rst8;                   // From uartrx_i of uartrx_m.v
    wire                 rxce;                   // From rxtxdiv_i of rxtxdiv_m.v
+   wire [1:0]           rxstate;                // From uartrx_i of uartrx_m.v
    // End of automatics
    uarttx_m uarttx_i
      (/*AUTOINST*/
@@ -76,6 +77,7 @@ module uart
       .bytercvd                         (bytercvd),
       .rst8                             (rst8),
       .rst4                             (rst4),
+      .rxstate                          (rxstate[1:0]),
       .q                                (q[7:0]),
       // Inputs
       .clk                              (clk),
@@ -91,7 +93,8 @@ module uart
       .ce                               (ce),
       .rst8                             (rst8),
       .rst4                             (rst4),
-      .load                             (load));
+      .load                             (load),
+      .rxstate                          (rxstate[1:0]));
    prediv_m #( .SYSCLKFRQ(SYSCLKFRQ), .BITCLKFRQ(BITCLKFRQ),
                .ACCEPTEDERROR_IN_PERCENT(ACCEPTEDERROR_IN_PERCENT))
    prediv_i
@@ -256,22 +259,22 @@ module uarttx_m
    
    // Synchronizer stage: pp <= load*pp | ~load*txce&cy10*a0 | ~load&~txce&pp
    SB_LUT4 #(.LUT_INIT(16'hb888))
-   pp_i( .O(c_pp), .I3(cy[10]), .I2(a[0]), .I1(load), .I0(pp));
+   pp_i( .O(c_pp), .I3(cy[10]), .I2(a[0]), .I1(load), .I0(txpin));
    SB_DFFE pp_r( .Q(txpin), .C(clk), .E(loadORtxce), .D(c_pp) );
 endmodule
 
 //////////////////////////////////////////////////////////////////////////////
 /* 
- Want a freerunning 3-bit counter with terminal count.  Terminal count
- only high one cycle. We do this with an up-counter.  We also want to
+ Want a freerunning 3-bit counter with terminal count. Terminal count
+ only high one cycle. We do this with an up-counter. We also want to
  or in "load". This is the transmit clock enable.
   
  Also want a freerunning 3-bit counter, but resettable to initial
  count, and to half-full. We do this with an upcounter. This is the
  receive clock enable.
  
- 0   --------- I0                         __              
- rst --------- I1   ce & cy & ~rst    ---|  |-- rxce      
+ rxstate[0] -- I0                         __              
+ rxstate[1] -- I1   ce & (cy | HUNT)  ---|  |-- rxce      
  ce  --------- I2                        >__|             
         +----- I3
         |                                 
@@ -322,8 +325,9 @@ endmodule
 //////////////////////////////////////////////////////////////////////////////
 module rxtxdiv_m
   (
-   input  clk,ce,rst8,rst4,load,
-   output loadORtxce,rxce
+   input       clk,ce,rst8,rst4,load,
+   input [1:0] rxstate,
+   output      loadORtxce,rxce
    );
    wire [2:0] c_tnt,tnt,c_cnt,cnt;
    wire [7:1] cy;
@@ -359,8 +363,8 @@ module rxtxdiv_m
    SB_CARRY i_cy6(.CO(cy[7]), .CI(cy[6]), .I1(cnt[2]), .I0(rst8));
    SB_DFF reg6( .Q(cnt[2]), .C(clk), .D(c_cnt[2]));
 
-   SB_LUT4 #(.LUT_INIT(16'h3000))
-   i_cnt3(.O(c_rxce), .I3(cy[7]), .I2(ce), .I1(rst8), .I0(1'b0));
+   SB_LUT4 #(.LUT_INIT(16'hf010))
+   i_cnt3(.O(c_rxce), .I3(cy[7]), .I2(ce), .I1(rxstate[1]), .I0(rxstate[0]));
    SB_DFF regrxce( .Q(rxce), .C(clk), .D(c_rxce));
 endmodule
 
@@ -400,6 +404,7 @@ module uartrx_m
    (
     input        clk,rxce,rxpin,
     output       bytercvd,rst8,rst4,
+    output [1:0] rxstate,
     output [7:0] q
     );
    /*AUTOWIRE*/
@@ -408,7 +413,6 @@ module uartrx_m
    wire                 c_byterx;               // From rxsm of uartrxsm_m.v
    wire                 c_halfbitcntld;         // From rxsm of uartrxsm_m.v
    wire                 c_ishift;               // From rxsm of uartrxsm_m.v
-   wire [1:0]           rxstate;                // From rxsm of uartrxsm_m.v
    // End of automatics
    
    uartrxsm_m rxsm(// Inputs
@@ -430,12 +434,12 @@ module uartrx_m
    assign v[8] = rxpin;
    generate
       for ( i = 0; i < 8; i = i + 1 ) begin : blk
-         SB_LUT4 #(.LUT_INIT(16'hacaa))
-         sh( .O(c_sh[i]), .I3(rxce), .I2(rxstate[0]), .I1(v[i+1]), .I0(v[i]));
+         SB_LUT4 #(.LUT_INIT(16'hef40))
+         sh( .O(c_sh[i]), .I3(v[i]), .I2(rxstate[1]), .I1(rxstate[0]), .I0(v[i+1]));
          if ( i == 7 ) begin
-            SB_DFFSS shreg( .Q(v[i]), .C(clk), .S(c_ishift), .D(c_sh[i]) );
+            SB_DFFESS shreg( .Q(v[i]), .C(clk), .S(c_ishift), .E(rxce), .D(c_sh[i]) );
          end else begin
-            SB_DFFSR shreg( .Q(v[i]), .C(clk), .R(c_ishift), .D(c_sh[i]) );
+            SB_DFFESR shreg( .Q(v[i]), .C(clk), .R(c_ishift), .E(rxce), .D(c_sh[i]) );
          end
       end
 
@@ -611,8 +615,8 @@ Reception. State machine
  Rst4   =  BAEC==00xx   | BAEC == 100x | BAEC == 1011 | BAEC == 111x 
  Nxt[0] =  dcba == 0011 | dcba == 0000 
  
- Shift shift register right whenever (rxce & !r_state[0]), that is in
- states HUNT and RCV.  When initshiftreg == 1, load sh[7:0] == 0x80
+ Shift shift register right in state RCV.  
+ When initshiftreg == 1, load sh[7:0] == 0x80
   
  6 LUT solution.
 
@@ -637,43 +641,44 @@ Reception. State machine
          10x  HUNT    0001   Frame bit not right, silently reject byte
          11x  HUNT    1001
    
-bytereceived --------------------------------+--------------------- to INTF0
-initshiftreg -----------------+              |
-                      ____    |              |    _____         
-rxpin ---------------|    |   |  __          +---|-+   |   _    
-rxce --------+-------|    |---(-|  |--+------(---|-|1\_|__| |__ ___ d[7]
-r_state[0] --(-+-----|    |   | >  |  |      | +-| |0/ |  >_|  |
-             | | +---|____|   +-S__|  |      | | |_____|       |
-             | | |            |       |      | +---------------+
-             | | +------------(-------+      |
-             | | |    ____    |              |    _____         
-             | | +---|    |   |  __          +---|-+   |   _    
-             +-(-----|    |---(-|  |--+------(---|-|1\_|__| |__ ___ d[6]
-             | +-----|    |   | >  |  |      | +-| |0/ |  >_|  |
-             | | +---|____|   +-R__|  |      | | |_____|       |
-             | | |            |       |      | +---------------+
-             | | +------------(-------+      |
-             | | |            |              |
-             : : :            :              :
-             | |                             |
-             | | |    ____    |              |    _____         
-             | | +---|    |   |  __          +---|-+   |   _    
-             +-(-----|    |---(-|  |--+------(---|-|1\_|__| |__ ___ d[1]
-             | +-----|    |   | >  |  |      | +-| |0/ |  >_|  |
-             | | +---|____|   +-R__|  |      | | |_____|       |
-             | | |            |       |      | +---------------+
-             | | +------------(-------+      |
-             | | |    ____    |              |    _____
-             | | +---|    |   |  __          +---|-+   |   _
-             +-(-----|    |---(-|  |--+----------|-|1\_|__| |__ ___ d[0]
-               +-----|    |   | >  |  |        +-| |0/ |  >_|  |
-                 +---|____|   +-R__|  |        | |_____|       |
-                 |                    |        +---------------+
-                 +--------------------+---------------------------- lastbit
-                                               Extra resources - 
-                                               can free up the carry
-                                               chain by using CE
-                                               to these registers.
+bytereceived ---------------------------------+--------------------- to INTF0
+initshiftreg ------------------+              |
+rxce         ----------------+ |              |
+                      ____   | |              |    _____         
+rxpin ---------------|    |  | |  __          +---|-+   |   _    
+r_state[0] --+-------|    |--(-(-|  |--+------(---|-|1\_|__| |__ ___ d[7]
+r_state[1] --(-+-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
+             | | +---|____|  | +-S  |  |      | | |_____|       |
+             | | |           +-(-CE_|  |      | +---------------+
+             | | +-----------(-(-------+      |
+             | | |    ____   | |              |    _____         
+             | | +---|    |  | |  __          +---|-+   |   _    
+             +-(-----|    |--(-(-|  |--+------(---|-|1\_|__| |__ ___ d[6]
+             | +-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
+             | | +---|____|  | +-R  |  |      | | |_____|       |
+             | | |           +-(-CE_|  |      | +---------------+
+             | | +-----------(-(-------+      |
+             | | |           | |              |
+             : : :           | :              :
+             | |             |                |
+             | | |    ____   | |              |    _____         
+             | | +---|    |  | |  __          +---|-+   |   _    
+             +-(-----|    |--(-(-|  |--+------(---|-|1\_|__| |__ ___ d[1]
+             | +-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
+             | | +---|____|  | +-R  |  |      | | |_____|       |
+             | | |           +-(-CE_|  |      | +---------------+
+             | | +-----------|-(-------+      |
+             | | |    ____   | |              |    _____
+             | | +---|    |  | |  __          +---|-+   |   _
+             +-(-----|    |--(-(-|  |--+----------|-|1\_|__| |__ ___ d[0]
+               +-----|    |  | | >  |  |        +-| |0/ |  >_|  |
+                 +---|____|  | +-R  |  |        | |_____|       |
+                 |           +---CE_|  |        +---------------+
+                 +---------------------+---------------------------- lastbit
+                                                Extra resources - 
+                                                can free up the carry
+                                                chain by using CE
+                                                to these registers.
  Example for 12MHz clock, 115200:
   6 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
@@ -723,14 +728,20 @@ r_state[0] --(-+-----|    |   | >  |  |      | +-| |0/ |  >_|  |
  -------------
  42 LogicCells total
  
+ The shift register is only shifted during reception, and is otherwise
+ only changed when the receive state machine goes from ARMED to
+ RCV. Logic using the receiver will know a byte is received when the
+ receive state machine goes from GRACE to HUNT. The implication is
+ that we are guaranteed that a received byte stay unmodified for 1/8 +
+ 1/2 bit time. If it can be guaranteed that the *shiftregister* can be
+ read in this time, we can remove the parallel holding register, and
+ save 8 LogicCells. An example: At 12MHz, 115200 has a bit time of 104
+ cycles. 1/8 bit time is 13 cycles, 1/2 bit time is 52 cycles.
  
- If it can be guaranteed that the *shiftregister* can be read in 1/2
- bit time we can remove the parallel holding register, and save 8
- LogicCells. An example: At 12MHz, 115200 has a bit time of 104
- cycles. 1/2 bit time is 52 cycles. Interrupt response of a slow Epick
- must then be better than (52-2-10)/2 = 20 instructions, which should
- not be difficult to acheive. Of cause, with a byte buffer we have
- 1041 clock cycles to react.
+ Interrupt response of a slow Epick must then be better than
+ (13+52-2-10)/2 = 26 instructions, which should not be difficult to
+ acheive. Of cause, with a byte buffer we have 1041 clock cycles, 520
+ instructions, to react.
  
  example1_ISR:; ISR with read into a circular buffer
      bcf     INTCON,4 ;  Clear (the only) interrupt source
