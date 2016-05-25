@@ -28,7 +28,15 @@
  *     In that case 8 logic cells are saved, but the byte must be
  *     read in less than 5/8 bit transfer time. It is reccommended to
  *     set HASRXBYTEREGISTER == 1.
- * 
+ *   - ACCEPTEDERROR_IN_PERCENT determine if it is possible to reach
+       a required quality on the actual bitrate compared to the
+       desired bitrate. In itself, this solution samples the receive
+       line 8 times in a bit period. Hence, inherently, there is a 12.5%
+       uncertainty in the determination on where a startbit really starts.
+       Because a prescaler will normaly not be perfect, the sampling time
+       of each bit is either leading or lagging, and the error accumulates
+       over the startbit, the data bits, and the frame bit. This parameter
+       sets a limit to how far the error is allowed to drift.
  * There is no checks on overrun of the receive buffer.
  * 
  */
