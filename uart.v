@@ -19,14 +19,14 @@
  *   - SYSCLKFRQ is the system clock frequency. It must be stated
  *     in order to construct a correct bit clock prescaler.
  *   - BITCLKFRQ is the speed of the uart serial operation. It
- *     must be stated in order to correct the prescaler.
+ *     must be stated in order to construct the prescaler.
  *   - HASRXBYTEREGISTER is a switch. When true, the received
  *     byte is written to a 8-bit holding register, and can be
  *     read at relative leasure, while the receiver shift register
  *     is busy receiving the next byte. If HASRXBYTEREGISTER is false 
  *     the received byte is read directly from the shift register.
  *     In that case 8 logic cells are saved, but the byte must be
- *     read in less than 1/2 bit transfer time. It is reccommended to
+ *     read in less than 5/8 bit transfer time. It is reccommended to
  *     set HASRXBYTEREGISTER == 1.
  * 
  * There is no checks on overrun of the receive buffer.
@@ -164,7 +164,7 @@ module prediv_m
     * chain. The final carry out is registered, and this is the result
     * of the prescaler. For simplicity the predivider is a down-counter.
     * Slightly less use of routing resources is possible if I had made
-    * an up-counter instead. This is not done to let debugging be
+    * an up-counter instead. This is not done yet to let debugging be
     * simpler. 
     * 
     * Work. During simulation, pay attention to corner-cases. Loading of 0
