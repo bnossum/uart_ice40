@@ -1,5 +1,6 @@
 //////////////////////////////////////////////////////////////////////////////
-/* An uart specifically for iCE40, in 42 logic cells,  predivider not included.
+/* bn:
+ * An uart specifically for iCE40, in 42 logic cells,  predivider not included.
  * Typical size is around 50 logic cells.
  * 
  * Usage:
@@ -41,7 +42,7 @@
  * 
  */
  
-module uart
+module uart_m
   # (parameter HASRXBYTEREGISTER = 1, // 0 : q from serial receivebuffer
      //                                  1 : q from byte buffer 
      SYSCLKFRQ = 12000000,            // System Clock Frequency in Hz
@@ -55,12 +56,12 @@ module uart
         input        rxpin, //    Connect to receive pin of uart
         output       txpin, //    Connect to INVERTED transmit pin of uart
         output       txbusy, //   Status of transmit. When high do not load
+        output       bitx8ce, //  True one clock cycle 8 times per bit
         output       bytercvd, // Status receive. True 1 bit period cycle only
         output [7:0] q //         Received byte from serial receive/byte buffer
         );
    /*AUTOWIRE*/
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
-   wire                 ce;                     // From prediv_i of prediv_m.v
    wire                 loadORtxce;             // From rxtxdiv_i of rxtxdiv_m.v
    wire                 prediv_m_dummy;         // From prediv_i of prediv_m.v
    wire                 rst4;                   // From uartrx_i of uartrx_m.v
@@ -98,7 +99,7 @@ module uart
       .rxce                             (rxce),
       // Inputs
       .clk                              (clk),
-      .ce                               (ce),
+      .bitx8ce                          (bitx8ce),
       .rst8                             (rst8),
       .rst4                             (rst4),
       .load                             (load),
@@ -108,7 +109,7 @@ module uart
    prediv_i
      (/*AUTOINST*/
       // Outputs
-      .ce                               (ce),
+      .bitx8ce                          (bitx8ce),
       .prediv_m_dummy                   (prediv_m_dummy),
       // Inputs
       .clk                              (clk),
@@ -149,7 +150,7 @@ module prediv_m
      ACCEPTEDERROR_IN_PERCENT = 20  /*  How accurate must we be?     */
      ) (
         input  clk,cte1,
-        output ce,prediv_m_dummy
+        output bitx8ce,prediv_m_dummy
         );
    localparam real    F_IDEALPREDIVIDE = SYSCLKFRQ / (BITCLKFRQ*8.0);
    localparam integer PREDIVIDE = (2*SYSCLKFRQ+1) / (BITCLKFRQ*8*2); // What are rules of rounding in Verilog? Truncate?
@@ -188,7 +189,7 @@ module prediv_m
       end
 
       if ( PREDIVIDE_m1 == 0 ) begin
-         assign ce = 1'b1; // No prescaler needed. 
+         assign bitx8ce = 1'b1; // No prescaler needed. 
       end else begin
          genvar             j;
          wire [15:0]        cy,c_cnt,r_cnt;
@@ -198,14 +199,15 @@ module prediv_m
             localparam v = 16'h4114 + ((b&1)? 16'haaaa : 0);
             
             SB_LUT4  #(.LUT_INIT(v))
-            i_cnt( .O(c_cnt[j]), .I3(cy[j]), .I2(r_cnt[j]), .I1(cte1), .I0(ce));
+            i_cnt( .O(c_cnt[j]), 
+                   .I3(cy[j]), .I2(r_cnt[j]), .I1(cte1), .I0(bitx8ce));
             SB_CARRY carry( .CO(cy[j+1]),.CI(cy[j]),.I1(r_cnt[j]), .I0(cte1));
             SB_DFF cnt_inst( .Q(r_cnt[j]), .C(clk), .D(c_cnt[j]) );
          end
          SB_LUT4 #(.LUT_INIT(16'h000f)) 
          cmb_tc( .O(c_tc), .I3(cy[j]), .I2(r_tc), .I1(1'b0),  .I0(1'b0));
          SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
-         assign ce = r_tc;
+         assign bitx8ce = r_tc;
       end
    endgenerate
 endmodule
@@ -333,7 +335,7 @@ endmodule
 //////////////////////////////////////////////////////////////////////////////
 module rxtxdiv_m
   (
-   input       clk,ce,rst8,rst4,load,
+   input       clk,bitx8ce,rst8,rst4,load,
    input [1:0] rxstate,
    output      loadORtxce,rxce
    );
@@ -342,21 +344,21 @@ module rxtxdiv_m
    wire       c_rxce;
    
    SB_LUT4 #(.LUT_INIT(16'hc33c)) 
-   i_tnt0(.O(c_tnt[0]),       .I3(1'b0),  .I2(tnt[0]), .I1(ce), .I0(1'b0));
-   SB_CARRY i_cy0(.CO(cy[1]), .CI(1'b0),  .I1(tnt[0]), .I0(ce));
+   i_tnt0(.O(c_tnt[0]),       .I3(1'b0),  .I2(tnt[0]), .I1(bitx8ce), .I0(1'b0));
+   SB_CARRY i_cy0(.CO(cy[1]), .CI(1'b0),  .I1(tnt[0]), .I0(bitx8ce));
    SB_DFF reg0( .Q(tnt[0]), .C(clk), .D(c_tnt[0]));
    SB_LUT4 #(.LUT_INIT(16'hc33c)) 
-   i_tnt1(.O(c_tnt[1]),       .I3(cy[1]), .I2(tnt[1]), .I1(ce), .I0(1'b0));
-   SB_CARRY i_cy1(.CO(cy[2]), .CI(cy[1]), .I1(tnt[1]), .I0(ce));
+   i_tnt1(.O(c_tnt[1]),       .I3(cy[1]), .I2(tnt[1]), .I1(bitx8ce), .I0(1'b0));
+   SB_CARRY i_cy1(.CO(cy[2]), .CI(cy[1]), .I1(tnt[1]), .I0(bitx8ce));
    SB_DFF reg1( .Q(tnt[1]), .C(clk), .D(c_tnt[1]));
    SB_LUT4 #(.LUT_INIT(16'hc33c)) 
-   i_tnt2(.O(c_tnt[2]),       .I3(cy[2]), .I2(tnt[2]), .I1(ce), .I0(1'b0));
-   SB_CARRY i_cy2(.CO(cy[3]), .CI(cy[2]), .I1(tnt[2]), .I0(ce));
+   i_tnt2(.O(c_tnt[2]),       .I3(cy[2]), .I2(tnt[2]), .I1(bitx8ce), .I0(1'b0));
+   SB_CARRY i_cy2(.CO(cy[3]), .CI(cy[2]), .I1(tnt[2]), .I0(bitx8ce));
    SB_DFF reg2( .Q(tnt[2]), .C(clk), .D(c_tnt[2]));
    
    SB_LUT4 #(.LUT_INIT(16'hfaaa)) 
-   i_tnt3(.O(loadORtxce),     .I3(cy[3]), .I2(ce    ), .I1(ce), .I0(load));
-   SB_CARRY i_cy3(.CO(cy[4]), .CI(cy[3]), .I1(ce    ), .I0(ce));
+   i_tnt3(.O(loadORtxce),     .I3(cy[3]),.I2(bitx8ce ), .I1(bitx8ce),.I0(load));
+   SB_CARRY i_cy3(.CO(cy[4]), .CI(cy[3]),.I1(bitx8ce ), .I0(bitx8ce));
 
    SB_LUT4 #(.LUT_INIT(16'h8bb8)) 
    i_cnt0(.O(c_cnt[0]),       .I3(cy[4]), .I2(cnt[0]), .I1(rst8), .I0(1'b0));
@@ -372,7 +374,7 @@ module rxtxdiv_m
    SB_DFF reg6( .Q(cnt[2]), .C(clk), .D(c_cnt[2]));
 
    SB_LUT4 #(.LUT_INIT(16'hf010))
-   i_cnt3(.O(c_rxce), .I3(cy[7]), .I2(ce), .I1(rxstate[1]), .I0(rxstate[0]));
+   i_cnt3(.O(c_rxce), .I3(cy[7]), .I2(bitx8ce),.I1(rxstate[1]),.I0(rxstate[0]));
    SB_DFF regrxce( .Q(rxce), .C(clk), .D(c_rxce));
 endmodule
 
