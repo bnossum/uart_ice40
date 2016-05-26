@@ -222,7 +222,7 @@ module AssertModule
 endmodule
 
 //////////////////////////////////////////////////////////////////////////////
-// 12 LogicCells. See documentation at end of file.  pp is to be
+// 12 LogicCells. See documentation at end of file.  txpin is to be
 // connected to a pad with INVERTED output. This way uart transmit
 // will go to inactive during power-up.
 module uarttx_m
