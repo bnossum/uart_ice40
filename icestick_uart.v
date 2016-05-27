@@ -1,5 +1,4 @@
-/* bn:
- * Top level that just instantiates a UART in loopback mode in an icestick.
+/* Top level that just instantiates a UART in loopback mode in an icestick.
  * 
  * WARNING - not tested yet! Do not use yet!
  * 
