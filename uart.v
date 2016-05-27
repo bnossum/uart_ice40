@@ -1,6 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-/* bn:
- * An uart specifically for iCE40, in 42 logic cells,  predivider not included.
+/* An uart specifically for iCE40, in 42 logic cells,  predivider not included.
  * Typical size is around 50 logic cells.
  * 
  * Usage:
@@ -152,6 +151,7 @@ module prediv_m
         input  clk,cte1,
         output bitx8ce,prediv_m_dummy
         );
+   wire        r_tc;
    localparam real    F_IDEALPREDIVIDE = SYSCLKFRQ / (BITCLKFRQ*8.0);
    localparam integer PREDIVIDE = (2*SYSCLKFRQ+1) / (BITCLKFRQ*8*2); // What are rules of rounding in Verilog? Truncate?
    localparam real    RESULTING_BITFRQ = SYSCLKFRQ / (PREDIVIDE*8.0);
@@ -160,6 +160,7 @@ module prediv_m
                       (BITCLKFRQ - RESULTING_BITFRQ)/BITCLKFRQ;
    localparam real    REL_ERR_OVER_FRAME_IN_PERCENT = REL_ERR * 10 * 100;
    localparam integer PREDIVIDE_m1 = PREDIVIDE - 1; 
+   localparam integer PRED_initval = (~PREDIVIDE_m1)+1;
    
    /* A worked example. Assume SYSCLKFRQ = 4000000 Hz, BITCLKFRQ = 9600
     *
@@ -171,10 +172,7 @@ module prediv_m
     * 
     * I arrange for the predivider to be a counter that uses the carry
     * chain. The final carry out is registered, and this is the result
-    * of the prescaler. For simplicity the predivider is a down-counter.
-    * Slightly less use of routing resources is possible if I had made
-    * an up-counter instead. This is not done yet to let debugging be
-    * simpler. 
+    * of the prescaler. The predivider is amn up=counter.
     * 
     * Work. During simulation, pay attention to corner-cases. Loading of 0
     * count length multiple of (1<<x), etc.
@@ -193,20 +191,23 @@ module prediv_m
       end else begin
          genvar             j;
          wire [15:0]        cy,c_cnt,r_cnt;
-         assign cy[0] = 0;
+         assign cy[0] = 1'b1;
          for ( j = 0; PREDIVIDE_m1 >> j; j = j + 1 ) begin
-            localparam b = (PREDIVIDE_m1 >> j);
+            localparam b = (PRED_initval >> j);
             localparam v = 16'h4114 + ((b&1)? 16'haaaa : 0);
             
             SB_LUT4  #(.LUT_INIT(v))
             i_cnt( .O(c_cnt[j]), 
-                   .I3(cy[j]), .I2(r_cnt[j]), .I1(cte1), .I0(bitx8ce));
-            SB_CARRY carry( .CO(cy[j+1]),.CI(cy[j]),.I1(r_cnt[j]), .I0(cte1));
+                   .I3(cy[j]), .I2(r_cnt[j]), .I1(1'b0), .I0(bitx8ce));
+            SB_CARRY carry( .CO(cy[j+1]),.CI(cy[j]),.I1(r_cnt[j]), .I0(1'b0));
             SB_DFF cnt_inst( .Q(r_cnt[j]), .C(clk), .D(c_cnt[j]) );
+
+            if ( (PREDIVIDE_m1 >> (j+1)) == 0 ) begin
+               SB_LUT4 #(.LUT_INIT(16'h0f00)) 
+               cmb_tc( .O(c_tc), .I3(cy[j+1]),.I2(r_tc), .I1(1'b0),  .I0(1'b0));
+               SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
+            end
          end
-         SB_LUT4 #(.LUT_INIT(16'h000f)) 
-         cmb_tc( .O(c_tc), .I3(cy[j]), .I2(r_tc), .I1(1'b0),  .I0(1'b0));
-         SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
          assign bitx8ce = r_tc;
       end
    endgenerate
@@ -348,12 +349,12 @@ module rxtxdiv_m
    SB_CARRY i_cy0(.CO(cy[1]), .CI(1'b0),  .I1(tnt[0]), .I0(bitx8ce));
    SB_DFF reg0( .Q(tnt[0]), .C(clk), .D(c_tnt[0]));
    SB_LUT4 #(.LUT_INIT(16'hc33c)) 
-   i_tnt1(.O(c_tnt[1]),       .I3(cy[1]), .I2(tnt[1]), .I1(bitx8ce), .I0(1'b0));
-   SB_CARRY i_cy1(.CO(cy[2]), .CI(cy[1]), .I1(tnt[1]), .I0(bitx8ce));
+   i_tnt1(.O(c_tnt[1]),       .I3(cy[1]), .I2(tnt[1]), .I1(1'b0), .I0(1'b0));
+   SB_CARRY i_cy1(.CO(cy[2]), .CI(cy[1]), .I1(tnt[1]), .I0(1'b0));
    SB_DFF reg1( .Q(tnt[1]), .C(clk), .D(c_tnt[1]));
    SB_LUT4 #(.LUT_INIT(16'hc33c)) 
-   i_tnt2(.O(c_tnt[2]),       .I3(cy[2]), .I2(tnt[2]), .I1(bitx8ce), .I0(1'b0));
-   SB_CARRY i_cy2(.CO(cy[3]), .CI(cy[2]), .I1(tnt[2]), .I0(bitx8ce));
+   i_tnt2(.O(c_tnt[2]),       .I3(cy[2]), .I2(tnt[2]), .I1(1'b0), .I0(1'b0));
+   SB_CARRY i_cy2(.CO(cy[3]), .CI(cy[2]), .I1(tnt[2]), .I0(1'b0));
    SB_DFF reg2( .Q(tnt[2]), .C(clk), .D(c_tnt[2]));
    
    SB_LUT4 #(.LUT_INIT(16'hfaaa)) 
@@ -440,16 +441,19 @@ module uartrx_m
                    .rxpin               (rxpin));
    genvar        i;
    wire [7:0]    c_sh;
-   wire [8:0]    v;
-   assign v[8] = rxpin;
+   wire [7:0]    v;
+
    generate
       for ( i = 0; i < 8; i = i + 1 ) begin : blk
-         SB_LUT4 #(.LUT_INIT(16'hef40))
-         sh( .O(c_sh[i]), .I3(v[i]), .I2(rxstate[1]), .I1(rxstate[0]), .I0(v[i+1]));
+         SB_LUT4 #(.LUT_INIT(16'hef20))
+         sh( .O(c_sh[i]), .I3(v[i]), .I2(rxstate[1]), .I1(rxstate[0]), 
+             .I0(i==7 ? rxpin:v[i+1]));
          if ( i == 7 ) begin
-            SB_DFFESS shreg( .Q(v[i]), .C(clk), .S(c_ishift), .E(rxce), .D(c_sh[i]) );
+            SB_DFFESS 
+              shreg( .Q(v[i]), .C(clk), .S(c_ishift), .E(rxce), .D(c_sh[i]) );
          end else begin
-            SB_DFFESR shreg( .Q(v[i]), .C(clk), .R(c_ishift), .E(rxce), .D(c_sh[i]) );
+            SB_DFFESR 
+              shreg( .Q(v[i]), .C(clk), .R(c_ishift), .E(rxce), .D(c_sh[i]) );
          end
       end
 
