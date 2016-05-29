@@ -1,6 +1,9 @@
 //////////////////////////////////////////////////////////////////////////////
-/* An uart specifically for iCE40, in 33 or 41 logic cells,  
- * predivider not included. Typical total size is 50 logicCells or below.
+/* An uart specifically for iCE40, in 33 or 41 logic cells, predivider
+ * not included. Typical total size is 50 logicCells or below.  The uart
+ * is really minimal, and can't do all the things the Lattice 16550
+ * reference design can do.  On the other hand, it is less than 1/10th 
+ * of the size.
  * 
  * Usage:
  * o Input rxpin is intended to originate from a physical pin, but can
@@ -24,7 +27,7 @@
  *   - If data is read from the 8-bit holding register, it can be latched
  *     to other units from the clock cycle following bytercvd high. The
  *     holding register must be read before a complete new byte has been
- *     received, available time is 9 bit times. 
+ *     received, available time is a few cycles short of 10 bit times. 
  *   The bytercvd output is intended to be used to set an interrupt flag.
  * o There is no checks on overrun of the receive buffer.
  * 
@@ -522,54 +525,53 @@ endmodule
  c_NextState[0] =  DCBA == 100x |  DCBA == 11xx
  c_ByteReceived =  DCBA == 011x && rxce
  c_Initshiftreg =  DCBA == 100x && rxce
- c_Nrst4        =  ((DCBA == 100x |  DCBA == 11xx) & rxce) | ~rxce
+ c_rst4         =  DCBA == 0001
    
  Shift shift register right in state RECV, qualified with rxce
  When initshiftreg == 1, load sh[7:0] == 0x80 (qualified with rxce).
    
-bytereceived ---------------------------------+--------------------- to INTF0
-initshiftreg ------------------+              |
-rxce         ----------------+ |              |
-                      ____   | |              |    _____         
-rxpin ---------------|    |  | |  __          +---|-+   |   _    
-r_state[0] --+-------|    |--(-(-|  |--+------(---|-|1\_|__| |__ ___ d[7]
-r_state[1] --(-+-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
-             | | +---|____|  | +-S  |  |      | | |_____|       |
-             | | |           +-(-CE_|  |      | +---------------+
-             | | +-----------(-(-------+      |
-             | | |    ____   | |              |    _____         
-             | | +---|    |  | |  __          +---|-+   |   _    
-             +-(-----|    |--(-(-|  |--+------(---|-|1\_|__| |__ ___ d[6]
-             | +-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
-             | | +---|____|  | +-R  |  |      | | |_____|       |
-             | | |           +-(-CE_|  |      | +---------------+
-             | | +-----------(-(-------+      |
-             | | |           | |              |
-             : : :           | :              :
-             | |             |                |
-             | | |    ____   | |              |    _____         
-             | | +---|    |  | |  __          +---|-+   |   _    
-             +-(-----|    |--(-(-|  |--+------(---|-|1\_|__| |__ ___ d[1]
-             | +-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
-             | | +---|____|  | +-R  |  |      | | |_____|       |
-             | | |           +-(-CE_|  |      | +---------------+
-             | | +-----------|-(-------+      |
-             | | |    ____   | |              |    _____
-             | | +---|    |  | |  __          +---|-+   |   _
-             +-(-----|    |--(-(-|  |--+----------|-|1\_|__| |__ ___ d[0]
-               +-----|    |  | | >  |  |        +-| |0/ |  >_|  |
-                 +---|____|  | +-R  |  |        | |_____|       |
-                 |           +---CE_|  |        +---------------+
-                 +---------------------+---------------------------- lastbit
-                                                Extra resources - 
-                                                can free up the carry
-                                                chain by using CE
-                                                to these registers.
+bytereceived --------------------------------+--------------------- to INTF0
+rxce         ----------------+               |
+                      ____   |               |    _____         
+rxpin ---------------|    |  |   __          +---|-+   |   _    
+r_state[0] --+-------|    |--(--|  |--+------(---|-|1\_|__| |__ ___ d[7]
+r_state[1] --(-+-----|    |  |  >  |  |      | +-| |0/ |  >_|  |
+             | |     |____|  |  |  |  |      | | |_____|       |
+             | |             +--CE_|  |      | +---------------+
+             | | +-----------(--------+      |
+             | | |    ____   |               |    _____         
+             | | +---|    |  |   __          +---|-+   |   _    
+             +-(-----|    |--(--|  |--+------(---|-|1\_|__| |__ ___ d[6]
+             | +-----|    |  |  >  |  |      | +-| |0/ |  >_|  |
+             | |     |____|  |  |  |  |      | | |_____|       |
+             | |             +--CE_|  |      | +---------------+
+             | | +-----------(--------+      |
+             | | |           |               |
+             : : :           |               :
+             | |             |               |
+             | | |    ____   |               |    _____         
+             | | +---|    |  |   __          +---|-+   |   _    
+             +-(-----|    |--(--|  |--+------(---|-|1\_|__| |__ ___ d[1]
+             | +-----|    |  |  >  |  |      | +-| |0/ |  >_|  |
+             | |     |____|  |  |  |  |      | | |_____|       |
+             | |             +--CE_|  |      | +---------------+
+             | | +-----------|--------+      |
+             | | |    ____   |               |    _____
+             | | +---|    |  |   __          +---|-+   |   _
+             +-(-----|    |--(--|  |--+----------|-|1\_|__| |__ ___ d[0]
+               +-----|    |  |  >  |  |        +-| |0/ |  >_|  |
+                     |____|  |  |  |  |        | |_____|       |
+                             +--CE_|  |        +---------------+
+                                      +---------------------------- lastbit
+                                               Extra resources - 
+                                               can free up the carry
+                                               chain by using CE
+                                               to these registers.
 */
 module uartrxsm_m
   (
    input        clk,rxce,rxpin,lastbit,
-   output       bytercvd,rst4,c_ishift,
+   output       bytercvd,rst4,
    output [1:0] rxst
    ); 
    wire [1:0]   nxt_rxst;
@@ -578,8 +580,6 @@ module uartrxsm_m
    stnxt1_i( .O(nxt_rxst[1]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(lastbit));
    SB_LUT4 #(.LUT_INIT(16'h0080))
    bytercvd_i( .O(bytercvd), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
-   SB_LUT4 #(.LUT_INIT(16'h0200))
-   initshiftreg_i( .O(c_ishift), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin),.I0(rxce));
    SB_LUT4 #(.LUT_INIT(16'hf300))
    stnxt0_i(.O(nxt_rxst[0]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin),.I0(1'b0));
    SB_DFFE r_st0( .Q(rxst[0]), .C(clk), .E(rxce), .D(nxt_rxst[0]));
@@ -604,16 +604,12 @@ module uartrx_m
     output [7:0] q
     );
    /*AUTOWIRE*/
-   // Beginning of automatic wires (for undeclared instantiated-module outputs)
-   wire                 c_ishift;               // From rxsm of uartrxsm_m.v
-   // End of automatics
    uartrxsm_m rxsm(// Inputs
                    .lastbit( v[0] ),
                    /*AUTOINST*/
                    // Outputs
                    .bytercvd            (bytercvd),
                    .rst4                (rst4),
-                   .c_ishift            (c_ishift),
                    .rxst                (rxst[1:0]),
                    // Inputs
                    .clk                 (clk),
@@ -625,16 +621,11 @@ module uartrx_m
 
    generate
       for ( i = 0; i < 8; i = i + 1 ) begin : blk
-         SB_LUT4 #(.LUT_INIT(16'hbf80))
-         sh( .O(c_sh[i]), .I3(v[i]), .I2(rxst[1]), .I1(rxst[0]), 
+         localparam a = i == 7 ? 16'hbaba : 16'h8a8a;
+         SB_LUT4 #(.LUT_INIT(a))
+         sh( .O(c_sh[i]), .I3(1'b0), .I2(rxst[1]), .I1(rxst[0]), 
              .I0(i==7 ? rxpin:v[i+1]));
-         if ( i == 7 ) begin
-            SB_DFFESS 
-              shreg( .Q(v[i]), .C(clk), .S(c_ishift), .E(rxce), .D(c_sh[i]) );
-         end else begin
-            SB_DFFESR 
-              shreg( .Q(v[i]), .C(clk), .R(c_ishift), .E(rxce), .D(c_sh[i]) );
-         end
+         SB_DFFE  shreg( .Q(v[i]), .C(clk), .E(rxce), .D(c_sh[i]) );
       end
 
       if ( HASRXBYTEREGISTER ) begin
@@ -704,6 +695,7 @@ endmodule
   8     for bit clocks
  -------------
  41 LogicCells total
+ 33 LogicCells if the result can be read in 5 cycles maximum.
  
  The shift register is only shifted during reception, and is otherwise
  only changed when the receive state machine goes from ARMED to RCV.
