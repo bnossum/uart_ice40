@@ -15,7 +15,8 @@ module tst;
    reg [15:0] cyclecounter,simtocy;
    reg        load,bytercvd_dly1;
    wire       cte1,rxpin;
-   wire [7:0] d;
+   reg [7:0]  d;
+   reg        seenB;
    /*AUTOWIRE*/
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
    wire                 bitx8ce;                // From dut of uart_m.v
@@ -27,35 +28,51 @@ module tst;
    
    always # 20 clk = ~clk;
    assign cte1 = 1'b1;
-   assign d = 8'h41;
+
    
 
    initial begin
       $dumpfile("tst.lxt");
       $dumpvars(0,tst);
-      simtocy = 1500;
+      simtocy = 3000;
       clk <= 0;
       cyclecounter <= 0;
-      load <= 0;      
+      load <= 0;    
+      seenB <= 0;  
    end
 
    always @(posedge clk) begin
       cyclecounter <= cyclecounter+1;
       if ( cyclecounter > simtocy ) begin
-         if ( simtocy == 1500 )
+         if ( simtocy == 3000 )
            $display( "Simulation went off the rails" );
          $finish;
       end
-      load <= ( cyclecounter == 333 ) ? 1'b1 : 1'b0;
-
+      load <= ( cyclecounter == 333 ||
+                cyclecounter == 1555 )
+                ? 1'b1 : 1'b0;
+      if ( cyclecounter == 300 )
+        d <= 8'h41;
+      else if ( cyclecounter == 400 )
+        d <= 8'h4e;
+      
       bytercvd_dly1 <= bytercvd;
       if ( bytercvd_dly1 ) begin
-         if ( q != 8'h41 ) begin
-            $display( "Something is wrong" );
-            $finish;
+         if ( seenB ) begin
+            if ( q != 8'h4e ) begin
+               $display( "Something wrong2" );
+               $finish;
+            end else begin              
+               $display( "Success" );
+               simtocy <= cyclecounter+200;
+            end
          end else begin
-            $display( "Success" );
-            simtocy <= cyclecounter+100;
+            if ( q != 8'h41 ) begin
+               $display( "Something is wrong" );
+               $finish;
+            end else begin
+               seenB <= 1;
+            end
          end
       end
    end
