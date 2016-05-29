@@ -647,7 +647,7 @@ endmodule
  ---------------------------------
  
   Example for 12MHz clock, 115200:
-  5 LogicCells for rx state machine and control
+  4 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
  12 LogicCells for transmit part
      5 Prescaler /13 to get to 923 kHz
@@ -656,11 +656,11 @@ endmodule
                          needs a 14.1% eye-opening minimum.
  13    for bit clocks
  --------
- 46 LogicCells total.
- 38 LogicCells minimal version. Read no later than after 65 cycles.
+ 45 LogicCells total.
+ 37 LogicCells minimal version. Read no later than after 65 cycles.
  
  Exampler for 12MHz clock, 9600:
-  5 LogicCells for rx state machine and control
+  4 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
  12 LogicCells for transmit part
      9  Prescaler /156 to get 76.923 kHz 
@@ -668,13 +668,13 @@ endmodule
      4  rxce counter 8/4  9615 bps, 1.6% error over a byte
  17     for bit clocks
  -------------
- 50 LogicCells total
- 42 LogicCells minimal. Read no later than after 780 cycles.
+ 49 LogicCells total
+ 41 LogicCells minimal. Read no later than after 780 cycles.
  
  Example to establish the worst case I can think anyone would attempt,
  when it comes to implementation size. Assume a 270 MHz clock, want
  2400 bps.
-  5 LogicCells for rx state machine and control
+  4 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
  12 LogicCells for transmit part
     15  Prescaler /14062 to get a 192001 Hz clock enable (1 cycle)
@@ -682,11 +682,11 @@ endmodule
      4  rxce counter 8/4  2400 bps, 0.04% error over a byte.
  23     for bit clocks
  -------------
- 56 LogicCells total
+ 55 LogicCells total
 
  Minimum solution for this way to construct the counters.  Assume
  system clock is 8 times bitrate: 
-  5 LogicCells for rx state machine and control
+  4 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
  12 LogicCells for transmit part
      0  Prescaler
@@ -694,8 +694,8 @@ endmodule
      4  rxce counter 8/4  9615 bps, 1.6% error over a byte
   8     for bit clocks
  -------------
- 41 LogicCells total
- 33 LogicCells if the result can be read in 5 cycles maximum.
+ 40 LogicCells total
+ 32 LogicCells if the result can be read in 5 cycles maximum.
  
  The shift register is only shifted during reception, and is otherwise
  only changed when the receive state machine goes from ARMED to RCV.
