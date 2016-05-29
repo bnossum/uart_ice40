@@ -1,20 +1,33 @@
 //////////////////////////////////////////////////////////////////////////////
-/* An uart specifically for iCE40, in 42 logic cells,  predivider not included.
- * Typical size is around 50 logic cells.
+/* An uart specifically for iCE40, in 33 or 41 logic cells,  
+ * predivider not included. Typical total size is 50 logicCells or below.
  * 
  * Usage:
  * o Input rxpin is intended to originate from a physical pin, but can
- *   really come from anywhere. This input should have been clocked
+ *   really come from anywhere. This input must have been clocked
  *   through two ff's, to reduce chances of metastability.
  * o Output txpin is intended to be connected to a physical pin,
  *   where the output is *inverted*. The output of the uart is
  *   constructed this way to avoid a false transmit at power-on.
  *   txpin can really be used anywhere, but please remember to 
- *   invert it.
+ *   invert it. The reason for this choice is that iCE40 always initiate
+ *   ff's to 0 at power-on reset.
  * o When status output txbusy is low, a new byte can be transferred,
  *   use d[7:0] for the data, qualify with input load.
  * o If status output bytercvd is high (NB:one cycle only), a byte 
  *   has been received, and can be read from q[7:0].
+ *   - If data is read from the shift register, it can be latched to
+ *     other units qualified by bytercvd. In case a new byte is received
+ *     back-to-back, the shift register must be latched before a time of
+ *     5/8 bit times has passed, otherwise the shift register contents is
+ *     lost. 
+ *   - If data is read from the 8-bit holding register, it can be latched
+ *     to other units from the clock cycle following bytercvd high. The
+ *     holding register must be read before a complete new byte has been
+ *     received, available time is 9 bit times. 
+ *   The bytercvd output is intended to be used to set an interrupt flag.
+ * o There is no checks on overrun of the receive buffer.
+ * 
  * o Parameters:
  *   - SYSCLKFRQ is the system clock frequency. It must be stated
  *     in order to construct a correct bit clock prescaler.
@@ -29,16 +42,14 @@
  *     read in less than 5/8 bit transfer time. It is reccommended to
  *     set HASRXBYTEREGISTER == 1.
  *   - ACCEPTEDERROR_IN_PERCENT determine if it is possible to reach
-       a required quality on the actual bitrate compared to the
-       desired bitrate. In itself, this solution samples the receive
-       line 8 times in a bit period. Hence, inherently, there is a 12.5%
-       uncertainty in the determination on where a startbit really starts.
-       Because a prescaler will normaly not be perfect, the sampling time
-       of each bit is either leading or lagging, and the error accumulates
-       over the startbit, the data bits, and the frame bit. This parameter
-       sets a limit to how far the error is allowed to drift.
- * There is no checks on overrun of the receive buffer.
- * 
+ *     a required quality on the actual bitrate compared to the
+ *     desired bitrate. In itself, this solution samples the receive
+ *     line 8 times in a bit period. Hence, inherently, there is a 12.5%
+ *     uncertainty in the determination on where a startbit really starts.
+ *     Because a prescaler will normaly not be perfect, the sampling time
+ *     of each bit is either leading or lagging, and the error accumulates
+ *     over the startbit, the data bits, and the frame bit. This parameter
+ *     sets a limit to how far the error is allowed to drift.
  */
  
 module uart_m
@@ -64,9 +75,8 @@ module uart_m
    wire                 loadORtxce;             // From rxtxdiv_i of rxtxdiv_m.v
    wire                 prediv_m_dummy;         // From prediv_i of prediv_m.v
    wire                 rst4;                   // From uartrx_i of uartrx_m.v
-   wire                 rst8;                   // From uartrx_i of uartrx_m.v
    wire                 rxce;                   // From rxtxdiv_i of rxtxdiv_m.v
-   wire [1:0]           rxstate;                // From uartrx_i of uartrx_m.v
+   wire [1:0]           rxst;                   // From uartrx_i of uartrx_m.v
    // End of automatics
    uarttx_m uarttx_i
      (/*AUTOINST*/
@@ -83,9 +93,8 @@ module uart_m
      (/*AUTOINST*/
       // Outputs
       .bytercvd                         (bytercvd),
-      .rst8                             (rst8),
       .rst4                             (rst4),
-      .rxstate                          (rxstate[1:0]),
+      .rxst                             (rxst[1:0]),
       .q                                (q[7:0]),
       // Inputs
       .clk                              (clk),
@@ -99,10 +108,9 @@ module uart_m
       // Inputs
       .clk                              (clk),
       .bitx8ce                          (bitx8ce),
-      .rst8                             (rst8),
       .rst4                             (rst4),
       .load                             (load),
-      .rxstate                          (rxstate[1:0]));
+      .rxst                             (rxst[1:0]));
    prediv_m #( .SYSCLKFRQ(SYSCLKFRQ), .BITCLKFRQ(BITCLKFRQ),
                .ACCEPTEDERROR_IN_PERCENT(ACCEPTEDERROR_IN_PERCENT))
    prediv_i
@@ -111,8 +119,7 @@ module uart_m
       .bitx8ce                          (bitx8ce),
       .prediv_m_dummy                   (prediv_m_dummy),
       // Inputs
-      .clk                              (clk),
-      .cte1                             (cte1));
+      .clk                              (clk));
 endmodule
    
 //////////////////////////////////////////////////////////////////////////////
@@ -129,7 +136,7 @@ endmodule
  * As long as an acceptable solution in terms of accuracy can be
  * constructed with the above, this is the smallest implementation I
  * can make. When the bitrate is closer to the clockrate, better
- * approaches exists. These are not explored now.
+ * approaches exists. These are not explored.
  * 
  * The module need to know the system clock frequency, and also the
  * target bitrate. A parameter is also present to control the accuracy
@@ -148,7 +155,7 @@ module prediv_m
      BITCLKFRQ = 115200, /*             Bit Clock Frequency in Hz    */
      ACCEPTEDERROR_IN_PERCENT = 20  /*  How accurate must we be?     */
      ) (
-        input  clk,cte1,
+        input  clk,
         output bitx8ce,prediv_m_dummy
         );
    wire        r_tc;
@@ -178,7 +185,7 @@ module prediv_m
     * count length multiple of (1<<x), etc.
     */
 
-   assign prediv_m_dummy = cte1 | clk; // Vanity: Avoid a warning
+   assign prediv_m_dummy = clk; // Vanity: Avoid a warning
    generate
       if ( (REL_ERR_OVER_FRAME_IN_PERCENT > ACCEPTEDERROR_IN_PERCENT)
            || (PREDIVIDE_m1 < 0)
@@ -224,266 +231,14 @@ module AssertModule
    assign AssertKluge = AssertFailed;
 endmodule
 
-//////////////////////////////////////////////////////////////////////////////
-// 12 LogicCells. See documentation at end of file.  txpin is to be
-// connected to a pad with INVERTED output. This way uart transmit
-// will go to inactive during power-up.
-module uarttx_m
-   (
-    input       clk,cte1,load,loadORtxce,
-    input [7:0] d,
-    output      txpin, // To be connected to a pad with INVERTED output.
-    output      txbusy
-    );
-   genvar       i;
-   wire         c_txbusy,c_pp;
-   wire [9:0]   c_a,a;
-   wire [10:1]  cy;
+/* //////////////////////////////////////////////////////////////////////////////
+ The transmit part in 12 LogicCells.
+ txpin is to be connected to a pad with INVERTED output. This way uart
+ transmit will go to inactive during power-up.
 
-   // Sentinel bit ff <= load | ff*~txce (aka a9)
-   SB_LUT4 #(.LUT_INIT(16'haaaa))
-   ff_i(.O(c_a[9]), .I3(1'b0), .I2(1'b0), .I1(1'b0), .I0(load));
-   SB_DFFE ff_r( .Q(a[9]), .C(clk), .E(loadORtxce), .D(c_a[9]));
-   
-   // Shift register with parallel load. Zerodetect in carrychain
-   generate
-      for ( i = 0; i < 9; i = i + 1 ) begin : blk
-         if ( i == 0 ) begin
-            SB_LUT4 #(.LUT_INIT(16'h55cc))
-            shcmb( .O(c_a[i]), .I3(load), .I2(cte1), .I1(a[i+1]), .I0(1'b0));
-            SB_CARRY shcy(.CO(cy[i+1]), .CI(1'b0), .I1(cte1), .I0(a[i+1]));
-         end else begin
-            SB_LUT4 #(.LUT_INIT(16'h55cc))
-            shcmb( .O(c_a[i]), .I3(load), .I2(cte1), .I1(a[i+1]), .I0(d[i-1]));
-            SB_CARRY shcy(.CO(cy[i+1]), .CI(cy[i]), .I1(cte1), .I0(a[i+1]));
-         end
-         SB_DFFE r( .Q(a[i]), .C(clk), .E(loadORtxce), .D(c_a[i]));
-      end
-   endgenerate
-
-   // Transmit busy: txbusy <= load | ( ~load & |a[9:1]) | (~load&~txce&txbusy)
-   // Carry is transported unchanged across this LUT
-   SB_LUT4 #(.LUT_INIT(16'hffaa))
-   txbusy_i( .O(c_txbusy), .I3(cy[9]), .I2(cte1), .I1(1'b0), .I0(load));
-   SB_CARRY msbcy( .CO(cy[10]), .CI(cy[9]), .I1(cte1), .I0(1'b0));
-   SB_DFFE txbusy_r( .Q(txbusy), .C(clk), .E(loadORtxce), .D(c_txbusy));
-   
-   // Synchronizer stage: pp <= load*pp | ~load*txce&cy10*a0 | ~load&~txce&pp
-   SB_LUT4 #(.LUT_INIT(16'hb888))
-   pp_i( .O(c_pp), .I3(cy[10]), .I2(a[0]), .I1(load), .I0(txpin));
-   SB_DFFE pp_r( .Q(txpin), .C(clk), .E(loadORtxce), .D(c_pp) );
-endmodule
-
-//////////////////////////////////////////////////////////////////////////////
-/* 
- Want a freerunning 3-bit counter with terminal count. Terminal count
- only high one cycle. We do this with an up-counter. We also want to
- or in "load". This is the transmit clock enable.
-  
- Also want a freerunning 3-bit counter, but resettable to initial
- count, and to half-full. We do this with an upcounter. This is the
- receive clock enable.
- 
- rxstate[0] -- I0                         __              
- rxstate[1] -- I1   ce & (cy | HUNT)  ---|  |-- rxce      
- ce  --------- I2                        >__|             
-        +----- I3
-        |                                 
-      /cy\                               cnt is an up-counter
- rst4--(((---- I0                         __    
- rst --+((---- I1   ~rst&(cnt2^cy)    ---|  |-- cnt2
- cnt2 --(+---- I2   | rst&rst4           >__|   
-        +----- I3                               
-        |                                       
-      /cy\                                      
- 0   --(((---- I0                         __
- rst --+((---- I1   ~rst&(cnt1^cy)    ---|  |-- cnt1
- cnt1 --(+---- I2                        >__|
-        +----- I3
-        |
-      /cy\ 
- 0   --(((---- I0                         __
- rst --+((---- I1   ~rst&(cnt0^cy)    ---|  |-- cnt0
- cnt0 --(+---- I2                        >__|
-        +----- I3
-        | ce
-      /cy\
- load -(((---- I0  
- ce   -+((---- I1  
- ce   --(+---- I2  (cy&ce) | load = loadORtxce
-        +----- I3 
-        |
-      /cy\                               tnt is a up-counter
- 0   --(((---- I0                         __
- 0   --+((---- I1        (ce^tnt2^cy) ---|  |-- tnt2  
- tnt2 --(+---- I2                        >__|
-        +----- I3        
-        |                
-      /cy\               
- 0   --(((---- I0                         __
- 0   --+((---- I1        (ce^tnt1^cy) ---|  |-- tnt1
- tnt1 --(+---- I2                        >__|
-        +----- I3        
-        |                
-      /cy\               
- 0   --(((---- I0                         __
- ce  --+((---- I1        (ce^tnt0^0)  ---|  |-- tnt0
- tnt0 --(+---- I2                        >__|
-        +----- I3 
-        |
-       gnd
-  */
-//////////////////////////////////////////////////////////////////////////////
-module rxtxdiv_m
-  (
-   input       clk,bitx8ce,rst8,rst4,load,
-   input [1:0] rxstate,
-   output      loadORtxce,rxce
-   );
-   wire [2:0] c_tnt,tnt,c_cnt,cnt;
-   wire [7:1] cy;
-   wire       c_rxce;
-   
-   SB_LUT4 #(.LUT_INIT(16'hc33c)) 
-   i_tnt0(.O(c_tnt[0]),       .I3(1'b0),  .I2(tnt[0]), .I1(bitx8ce), .I0(1'b0));
-   SB_CARRY i_cy0(.CO(cy[1]), .CI(1'b0),  .I1(tnt[0]), .I0(bitx8ce));
-   SB_DFF reg0( .Q(tnt[0]), .C(clk), .D(c_tnt[0]));
-   SB_LUT4 #(.LUT_INIT(16'hc33c)) 
-   i_tnt1(.O(c_tnt[1]),       .I3(cy[1]), .I2(tnt[1]), .I1(1'b0), .I0(1'b0));
-   SB_CARRY i_cy1(.CO(cy[2]), .CI(cy[1]), .I1(tnt[1]), .I0(1'b0));
-   SB_DFF reg1( .Q(tnt[1]), .C(clk), .D(c_tnt[1]));
-   SB_LUT4 #(.LUT_INIT(16'hc33c)) 
-   i_tnt2(.O(c_tnt[2]),       .I3(cy[2]), .I2(tnt[2]), .I1(1'b0), .I0(1'b0));
-   SB_CARRY i_cy2(.CO(cy[3]), .CI(cy[2]), .I1(tnt[2]), .I0(1'b0));
-   SB_DFF reg2( .Q(tnt[2]), .C(clk), .D(c_tnt[2]));
-   
-   SB_LUT4 #(.LUT_INIT(16'hfaaa)) 
-   i_tnt3(.O(loadORtxce),     .I3(cy[3]),.I2(bitx8ce ), .I1(bitx8ce),.I0(load));
-   SB_CARRY i_cy3(.CO(cy[4]), .CI(cy[3]),.I1(bitx8ce ), .I0(bitx8ce));
-
-   SB_LUT4 #(.LUT_INIT(16'h8bb8)) 
-   i_cnt0(.O(c_cnt[0]),       .I3(cy[4]), .I2(cnt[0]), .I1(rst8), .I0(1'b0));
-   SB_CARRY i_cy4(.CO(cy[5]), .CI(cy[4]), .I1(cnt[0]), .I0(rst8));
-   SB_DFF reg4( .Q(cnt[0]), .C(clk), .D(c_cnt[0]));
-   SB_LUT4 #(.LUT_INIT(16'h8bb8)) 
-   i_cnt1(.O(c_cnt[1]),       .I3(cy[5]), .I2(cnt[1]), .I1(rst8), .I0(1'b0));
-   SB_CARRY i_cy5(.CO(cy[6]), .CI(cy[5]), .I1(cnt[1]), .I0(rst8));
-   SB_DFF reg5( .Q(cnt[1]), .C(clk), .D(c_cnt[1]));
-   SB_LUT4 #(.LUT_INIT(16'h8bb8)) 
-   i_cnt2(.O(c_cnt[2]),       .I3(cy[6]), .I2(cnt[2]), .I1(rst8), .I0(rst4));
-   SB_CARRY i_cy6(.CO(cy[7]), .CI(cy[6]), .I1(cnt[2]), .I0(rst8));
-   SB_DFF reg6( .Q(cnt[2]), .C(clk), .D(c_cnt[2]));
-
-   SB_LUT4 #(.LUT_INIT(16'hf010))
-   i_cnt3(.O(c_rxce), .I3(cy[7]), .I2(bitx8ce),.I1(rxstate[1]),.I0(rxstate[0]));
-   SB_DFF regrxce( .Q(rxce), .C(clk), .D(c_rxce));
-endmodule
-
-//////////////////////////////////////////////////////////////////////////////
-// 6 logic cells. See comment near end of file.
-module uartrxsm_m
-  (
-   input        clk,rxce,rxpin,lstbit,
-   output       c_byterx,c_bitcntld,c_halfbitcntld,c_ishift,
-   output [1:0] rxstate
-   ); 
-   wire [1:0]   stnxt,st;
-   
-   SB_LUT4 #(.LUT_INIT(16'h3f40))
-   stnxt1_i( .O(stnxt[1]), .I3(st[1]), .I2(st[0]), .I1(rxce), .I0(rxpin));
-   SB_LUT4 #(.LUT_INIT(16'h8000))
-   bytercvd_i( .O(c_byterx), .I3(st[1]), .I2(st[0]), .I1(rxce), .I0(rxpin));
-   SB_LUT4 #(.LUT_INIT(16'h0040))
-   initshiftreg_i( .O(c_ishift), .I3(st[1]), .I2(st[0]), .I1(rxce),.I0(rxpin));
-   SB_LUT4 #(.LUT_INIT(16'h0cc5))
-   bitcntld_i( .O(c_bitcntld), .I3(st[1]), .I2(st[0]), .I1(rxce), .I0(rxpin));
-   SB_LUT4 #(.LUT_INIT(16'hcb0f))
-   halfld_i(.O(c_halfbitcntld), .I3(st[1]), .I2(st[0]), .I1(rxce),.I0(lstbit));
-   SB_LUT4 #(.LUT_INIT(16'h0009))
-   stnxt0_i( .O(stnxt[0]), .I3(c_byterx), .I2(c_ishift), 
-             .I1(c_bitcntld), .I0(c_halfbitcntld));
-   SB_DFF r_st0( .Q(st[0]), .C(clk), .D(stnxt[0]));
-   SB_DFF r_st1( .Q(st[1]), .C(clk), .D(stnxt[1]));
-   assign rxstate = st;   
-endmodule
-
-//////////////////////////////////////////////////////////////////////////////
-// Should be 8+8+6 = 22 logic cells when HASRXBYTEREGISTER == 1
-// Should be   8+6 = 14 logic cells when HASRXBYTEREGISTER == 0
-module uartrx_m
-  # (parameter HASRXBYTEREGISTER = 0 )
-   (
-    input        clk,rxce,rxpin,
-    output       bytercvd,rst8,rst4,
-    output [1:0] rxstate,
-    output [7:0] q
-    );
-   /*AUTOWIRE*/
-   // Beginning of automatic wires (for undeclared instantiated-module outputs)
-   wire                 c_bitcntld;             // From rxsm of uartrxsm_m.v
-   wire                 c_byterx;               // From rxsm of uartrxsm_m.v
-   wire                 c_halfbitcntld;         // From rxsm of uartrxsm_m.v
-   wire                 c_ishift;               // From rxsm of uartrxsm_m.v
-   // End of automatics
-   
-   uartrxsm_m rxsm(// Inputs
-                   .lstbit( v[0] ),
-                   /*AUTOINST*/
-                   // Outputs
-                   .c_byterx            (c_byterx),
-                   .c_bitcntld          (c_bitcntld),
-                   .c_halfbitcntld      (c_halfbitcntld),
-                   .c_ishift            (c_ishift),
-                   .rxstate             (rxstate[1:0]),
-                   // Inputs
-                   .clk                 (clk),
-                   .rxce                (rxce),
-                   .rxpin               (rxpin));
-   genvar        i;
-   wire [7:0]    c_sh;
-   wire [7:0]    v;
-
-   generate
-      for ( i = 0; i < 8; i = i + 1 ) begin : blk
-         SB_LUT4 #(.LUT_INIT(16'hef20))
-         sh( .O(c_sh[i]), .I3(v[i]), .I2(rxstate[1]), .I1(rxstate[0]), 
-             .I0(i==7 ? rxpin:v[i+1]));
-         if ( i == 7 ) begin
-            SB_DFFESS 
-              shreg( .Q(v[i]), .C(clk), .S(c_ishift), .E(rxce), .D(c_sh[i]) );
-         end else begin
-            SB_DFFESR 
-              shreg( .Q(v[i]), .C(clk), .R(c_ishift), .E(rxce), .D(c_sh[i]) );
-         end
-      end
-
-      if ( HASRXBYTEREGISTER ) begin
-         wire [7:0] c_h,bytereg;
-         for ( i = 0; i < 8; i = i + 1 ) begin : blk2
-            SB_LUT4 #(.LUT_INIT(16'hcaca))
-            bt(.O(c_h[i]),.I3(1'b0),.I2(c_byterx), .I1(v[i]), .I0(bytereg[i]));
-            SB_DFF regbyte( .Q(bytereg[i]), .C(clk), .D(c_h[i]));            
-         end
-         assign q = bytereg;
-      end else begin
-         assign q = v;
-      end
-   endgenerate
-
-   assign rst4 = c_halfbitcntld;
-   assign rst8 = c_bitcntld;
-   assign bytercvd = c_byterx;
-endmodule
-
-/* 
- The transmit part:
- ------------------
- The advantage of this solution is that we avoid to rely on a
- cascaded LUT. Cascaded LUT is handled suboptimally by the lattice import
- tool, that adds a THRU_lut. The disadvantage is that clock enable
- exceeds 8 cells, hence will be used in two PLBs. As a consequence
- there are 4 logic cells where the FF has loadORtxce as clock enable,
- rendering these usable (but the LUTs can be used of course).
+ The main idea here is to have a 10-bit shift register. When all bits
+ are shifted out, a fact we find from the carry chain, transmission is
+ done. 
  
 loadORtxce -------------------+
 load                _____     |
@@ -540,6 +295,9 @@ load                _____     |
  |             |                         |
  |            gnd                        |
  +---------------------------------------+
+ 
+ The construction can be formalized as a state machine, something like:
+ 
                 load
                 |txce
  STATE          || cy9  NEXT_STATE
@@ -579,81 +337,195 @@ load                _____     |
  000000000001   00 0    000000000001  0  In unreachable state
                 01 0    000000000000  1  Exit from unreachable state (to idle)
                 1x 0    11hgfedcba10  1  Exit from unreach. state (to loaded)
+*/
+module uarttx_m
+   (
+    input       clk,cte1,load,loadORtxce,
+    input [7:0] d,
+    output      txpin, // To be connected to a pad with INVERTED output.
+    output      txbusy
+    );
+   genvar       i;
+   wire         c_txbusy,c_pp;
+   wire [9:0]   c_a,a;
+   wire [10:1]  cy;
 
- ============================================================================= 
-Reception. State machine
- 
-              Inputs                                       State encoding:   
-         +----rxce                                         HUNT  00          
-         |+---rxpin          Outputs                       ARMED 01          
-         ||+--lastbit +----- ByteReceived                  RCV   10          
-         |||          |+---- Initshiftreg                  GRACE 11          
-         |||          ||+--- rst8
-         |||  Nrcy    |||+-- rst4
- State   |||  State   ||||   Comment
- -------------------------------------------------
- HUNT    x1x  HUNT    00xx
-         x0x  ARMED   0011
- ARMED   0xx  ARMED   000x
-         10x  RCV     0110
-         11x  HUNT    00xx   False start bit
- RCV     0xx  RCV     000x
-         1x0  RCV     0010
-         1x1  GRACE   0011
- GRACE   0xx  GRACE   000x
-         10x  HUNT    00xx   Frame bit not right, reject byte
-         11x  HUNT    10xx
- 
- s[1:0]
- ||+---rxce   ByteReceived
- |||+--rxpin  |InitShiftreg   
- ||||+-lastbit||rst8
- |||||  Nxt   |||Rst4
- BAEDC        dcba
- 00x1x  00   .0001
- 00x0x  01   .0011
- 010xx  01   .0000
- 0110x  10   .0110
- 0111x  00   .0010
- 100xx  10   .0001
- 101x0  10   .0010
- 101x1  11   .0011
- 110xx  11   .0000
- 1110x  00   .0001
- 1111x  00   .1001
-  
- Nxt[1]             =  BAED==0110 | BAED == 10xx | BAED == 110x 
- ByteReceived       =  BAED==1111 
- InitShiftreg       =  BAED==0110
- rst8   =  BAED==00x0   | BAED == 011x | BAED == 101x 
- Rst4   =  BAEC==00xx   | BAEC == 100x | BAEC == 1011 | BAEC == 111x 
- Nxt[0] =  dcba == 0011 | dcba == 0000 
- 
- Shift shift register right in state RCV.  
- When initshiftreg == 1, load sh[7:0] == 0x80
-  
- 6 LUT solution.
+   // Sentinel bit ff <= load | ff*~txce (aka a9)
+   SB_LUT4 #(.LUT_INIT(16'haaaa))
+   ff_i(.O(c_a[9]), .I3(1'b0), .I2(1'b0), .I1(1'b0), .I0(load));
+   SB_DFFE ff_r( .Q(a[9]), .C(clk), .E(loadORtxce), .D(c_a[9]));
+   
+   // Shift register with parallel load. Zerodetect in carrychain
+   generate
+      for ( i = 0; i < 9; i = i + 1 ) begin : blk
+         if ( i == 0 ) begin
+            SB_LUT4 #(.LUT_INIT(16'h55cc))
+            shcmb( .O(c_a[i]), .I3(load), .I2(cte1), .I1(a[i+1]), .I0(1'b0));
+            SB_CARRY shcy(.CO(cy[i+1]), .CI(1'b0), .I1(cte1), .I0(a[i+1]));
+         end else begin
+            SB_LUT4 #(.LUT_INIT(16'h55cc))
+            shcmb( .O(c_a[i]), .I3(load), .I2(cte1), .I1(a[i+1]), .I0(d[i-1]));
+            SB_CARRY shcy(.CO(cy[i+1]), .CI(cy[i]), .I1(cte1), .I0(a[i+1]));
+         end
+         SB_DFFE r( .Q(a[i]), .C(clk), .E(loadORtxce), .D(c_a[i]));
+      end
+   endgenerate
 
-              Inputs                                       State encoding:   
-         +----rxce                                         HUNT  00          
-         |+---rxpin          Outputs                       ARMED 01          
-         ||+--lastbit +----- ByteReceived                  RCV   10          
-         |||          |+---- Initshiftreg                  GRACE 11          
-         |||          ||+--- rst8
-         |||  Nrcy    |||+-- rst4
- State   |||  State   ||||   Comment
- -------------------------------------------------
- HUNT    x1x  HUNT    0001
-         x0x  ARMED   0011   rst8/rst4 actually used
- ARMED   0xx  ARMED   0000
-         10x  RCV     0110   rst8/rst4 actually used
-         11x  HUNT    0010   False start bit
- RCV     0xx  RCV     0001
-         1x0  RCV     0010   rst8/rst4 actually used
-         1x1  GRACE   0011   rst8/rst4 actually used
- GRACE   0xx  GRACE   0000
-         10x  HUNT    0001   Frame bit not right, silently reject byte
-         11x  HUNT    1001
+   // Transmit busy: txbusy <= load | ( ~load & |a[9:1]) | (~load&~txce&txbusy)
+   // Carry is transported unchanged across this LUT
+   SB_LUT4 #(.LUT_INIT(16'hffaa))
+   txbusy_i( .O(c_txbusy), .I3(cy[9]), .I2(cte1), .I1(1'b0), .I0(load));
+   SB_CARRY msbcy( .CO(cy[10]), .CI(cy[9]), .I1(cte1), .I0(1'b0));
+   SB_DFFE txbusy_r( .Q(txbusy), .C(clk), .E(loadORtxce), .D(c_txbusy));
+   
+   // Synchronizer stage: pp <= load*pp | ~load*txce&cy10*a0 | ~load&~txce&pp
+   SB_LUT4 #(.LUT_INIT(16'hb888))
+   pp_i( .O(c_pp), .I3(cy[10]), .I2(a[0]), .I1(load), .I0(txpin));
+   SB_DFFE pp_r( .Q(txpin), .C(clk), .E(loadORtxce), .D(c_pp) );
+endmodule
+
+//////////////////////////////////////////////////////////////////////////////
+/* 
+ Generating enable bits for the transmit and the receive part.
+ 
+ Want a freerunning 3-bit counter with terminal count. Terminal count
+ only high one cycle. We do this with an up-counter. We also want to
+ or in "load". This is the transmit clock enable.
+  
+ Also want a freerunning 3-bit counter, but resettable to half-full. 
+ We do this with an upcounter. This is the receive clock enable.
+ 
+ rxstate[0] -- I0                         __              
+ rxstate[1] -- I1   ce & (cy | HUNT)  ---|  |-- rxce      
+ ce  --------- I2                        >__|             
+        +----- I3
+        |                                 
+      /cy\                               cnt is an up-counter
+ rst4--(((---- I0                         __    
+ 0   --+((---- I1   ~rst4&(cnt2^cy)   ---|  |-- cnt2
+ cnt2 --(+---- I2   | rst4               >__|   
+        +----- I3                               
+        |                                       
+      /cy\                                      
+ rst4--(((---- I0                         __
+ 0   --+((---- I1   rst4&(cnt1^cy)    ---|  |-- cnt1
+ cnt1 --(+---- I2                        >__|
+        +----- I3
+        |
+      /cy\ 
+ rst4--(((---- I0                         __
+ 0   --+((---- I1   rst4&(cnt0^cy)    ---|  |-- cnt0
+ cnt0 --(+---- I2                        >__|
+        +----- I3
+        | ce
+      /cy\
+ load -(((---- I0  
+ ce   -+((---- I1  
+ ce   --(+---- I2  (cy&ce) | load = loadORtxce
+        +----- I3 
+        |
+      /cy\                               tnt is a up-counter
+ 0   --(((---- I0                         __
+ 0   --+((---- I1        (ce^tnt2^cy) ---|  |-- tnt2  
+ tnt2 --(+---- I2                        >__|
+        +----- I3        
+        |                
+      /cy\               
+ 0   --(((---- I0                         __
+ 0   --+((---- I1        (ce^tnt1^cy) ---|  |-- tnt1
+ tnt1 --(+---- I2                        >__|
+        +----- I3        
+        |                
+      /cy\               
+ 0   --(((---- I0                         __
+ ce  --+((---- I1        (ce^tnt0^0)  ---|  |-- tnt0
+ tnt0 --(+---- I2                        >__|
+        +----- I3 
+        |
+       gnd
+  */
+//////////////////////////////////////////////////////////////////////////////
+module rxtxdiv_m
+  (
+   input       clk,bitx8ce,rst4,load,
+   input [1:0] rxst,
+   output      loadORtxce,rxce
+   );
+   wire [2:0]  c_tnt,tnt,c_cnt,cnt;
+   wire [7:1]  cy;
+   wire        c_rxce;
+   
+   SB_LUT4 #(.LUT_INIT(16'hc33c)) 
+   i_tnt0(.O(c_tnt[0]),       .I3(1'b0),  .I2(tnt[0]), .I1(bitx8ce), .I0(1'b0));
+   SB_CARRY i_cy0(.CO(cy[1]), .CI(1'b0),  .I1(tnt[0]), .I0(bitx8ce));
+   SB_DFF reg0( .Q(tnt[0]), .C(clk), .D(c_tnt[0]));
+   SB_LUT4 #(.LUT_INIT(16'hc33c)) 
+   i_tnt1(.O(c_tnt[1]),       .I3(cy[1]), .I2(tnt[1]), .I1(1'b0), .I0(1'b0));
+   SB_CARRY i_cy1(.CO(cy[2]), .CI(cy[1]), .I1(tnt[1]), .I0(1'b0));
+   SB_DFF reg1( .Q(tnt[1]), .C(clk), .D(c_tnt[1]));
+   SB_LUT4 #(.LUT_INIT(16'hc33c)) 
+   i_tnt2(.O(c_tnt[2]),       .I3(cy[2]), .I2(tnt[2]), .I1(1'b0), .I0(1'b0));
+   SB_CARRY i_cy2(.CO(cy[3]), .CI(cy[2]), .I1(tnt[2]), .I0(1'b0));
+   SB_DFF reg2( .Q(tnt[2]), .C(clk), .D(c_tnt[2]));
+  
+   SB_LUT4 #(.LUT_INIT(16'hfaaa)) 
+   i_tnt3(.O(loadORtxce),     .I3(cy[3]),.I2(bitx8ce ), .I1(bitx8ce),.I0(load));
+   SB_CARRY i_cy3(.CO(cy[4]), .CI(cy[3]),.I1(bitx8ce ), .I0(bitx8ce));
+
+   SB_LUT4 #(.LUT_INIT(16'h0550)) 
+   i_cnt0(.O(c_cnt[0]),       .I3(cy[4]), .I2(cnt[0]), .I1(1'b0), .I0(rst4));
+   SB_CARRY i_cy4(.CO(cy[5]), .CI(cy[4]), .I1(cnt[0]), .I0(1'b0));
+   SB_DFF reg4( .Q(cnt[0]), .C(clk), .D(c_cnt[0]));
+   SB_LUT4 #(.LUT_INIT(16'h0550)) 
+   i_cnt1(.O(c_cnt[1]),       .I3(cy[5]), .I2(cnt[1]), .I1(1'b0), .I0(rst4));
+   SB_CARRY i_cy5(.CO(cy[6]), .CI(cy[5]), .I1(cnt[1]), .I0(1'b0));
+   SB_DFF reg5( .Q(cnt[1]), .C(clk), .D(c_cnt[1]));
+   SB_LUT4 #(.LUT_INIT(16'haffa)) 
+   i_cnt2(.O(c_cnt[2]),       .I3(cy[6]), .I2(cnt[2]), .I1(1'b0), .I0(rst4));
+   SB_CARRY i_cy6(.CO(cy[7]), .CI(cy[6]), .I1(cnt[2]), .I0(1'b0));
+   SB_DFF reg6( .Q(cnt[2]), .C(clk), .D(c_cnt[2]));
+
+   SB_LUT4 #(.LUT_INIT(16'hf010))
+   i_cnt3(.O(c_rxce), .I3(cy[7]), .I2(bitx8ce),.I1(rxst[1]),.I0(rxst[0]));
+   SB_DFF regrxce( .Q(rxce), .C(clk), .D(c_rxce));
+endmodule
+
+/* ==========================================================================
+ Reception is controlled with a 2-bit state machine. When starting reception,
+ the receive shift register is initiated to 0x80, so when the first high is
+ shifted out of the register we have counted to 8.
+ 
+ Reception. State machine. Qualified with rxce
+  
+              Inputs          Next/Outputs                 State encoding:
+                      +------ NextState[1]
+          +---rxpin   |+------ NextState[0]                 HUNT  00 
+          |+--lastbit || +---- ByteReceived                 ARMD  10 
+          ||rxce      || |+--- Initshiftreg                 RECV  11 
+          |||         || ||+-- Nrst4                        GRCE  01
+  State   |||         || |||   Comment
+  -----DC BA----------DC--------------------------
+  HUNT 00 1xx         00 000   HUNT   
+  HUNT 00 0x0         10 001   HUNT
+  HUNT 00 0x1         10 000   ARMD   Nrst4 actually used
+  ARMD 10 xx0         10 001   ARMD
+  ARMD 10 0x1         11 011   RECV   
+  ARMD 10 1x1         00 000   HUNT   False start bit
+  RECV 11 xx0         11 001   RECV   
+  RECV 11 x01         11 001   RECV   
+  RECV 11 x11         01 001   GRCE   
+  GRCE 01 xx0         00 001   GRCE
+  GRCE 01 0x1         00 000   HUNT   Frame bit not right, reject byte
+  GRCE 01 1x1         00 100   HUNT   
+  
+ c_NextState[1] =  DCBA == x00x |  DCBA == 11x0
+ c_NextState[0] =  DCBA == 100x |  DCBA == 11xx
+ c_ByteReceived =  DCBA == 011x && rxce
+ c_Initshiftreg =  DCBA == 100x && rxce
+ c_Nrst4        =  ((DCBA == 100x |  DCBA == 11xx) & rxce) | ~rxce
+   
+ Shift shift register right in state RECV, qualified with rxce
+ When initshiftreg == 1, load sh[7:0] == 0x80 (qualified with rxce).
    
 bytereceived ---------------------------------+--------------------- to INTF0
 initshiftreg ------------------+              |
@@ -693,8 +565,98 @@ r_state[1] --(-+-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
                                                 can free up the carry
                                                 chain by using CE
                                                 to these registers.
- Example for 12MHz clock, 115200:
-  6 LogicCells for rx state machine and control
+*/
+module uartrxsm_m
+  (
+   input        clk,rxce,rxpin,lastbit,
+   output       bytercvd,rst4,c_ishift,
+   output [1:0] rxst
+   ); 
+   wire [1:0]   nxt_rxst;
+   
+   SB_LUT4 #(.LUT_INIT(16'h5303))
+   stnxt1_i( .O(nxt_rxst[1]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(lastbit));
+   SB_LUT4 #(.LUT_INIT(16'h0080))
+   bytercvd_i( .O(bytercvd), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
+   SB_LUT4 #(.LUT_INIT(16'h0200))
+   initshiftreg_i( .O(c_ishift), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin),.I0(rxce));
+   SB_LUT4 #(.LUT_INIT(16'hf300))
+   stnxt0_i(.O(nxt_rxst[0]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin),.I0(1'b0));
+   SB_DFFE r_st0( .Q(rxst[0]), .C(clk), .E(rxce), .D(nxt_rxst[0]));
+   SB_DFFE r_st1( .Q(rxst[1]), .C(clk), .E(rxce), .D(nxt_rxst[1]));
+   SB_LUT4 #(.LUT_INIT(16'h0002))
+   rst4_i( .O(rst4), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
+endmodule
+
+//////////////////////////////////////////////////////////////////////////////
+/*
+ The receive state machine is assembled together with the shift regiser,
+ and (optionally) a 8-bit holding regiser.
+ Should be   8+6 = 14 logic cells when HASRXBYTEREGISTER == 0
+ Should be 8+8+6 = 22 logic cells when HASRXBYTEREGISTER == 1
+ */
+module uartrx_m
+  # (parameter HASRXBYTEREGISTER = 0 )
+   (
+    input        clk,rxce,rxpin,
+    output       bytercvd,rst4,
+    output [1:0] rxst,
+    output [7:0] q
+    );
+   /*AUTOWIRE*/
+   // Beginning of automatic wires (for undeclared instantiated-module outputs)
+   wire                 c_ishift;               // From rxsm of uartrxsm_m.v
+   // End of automatics
+   uartrxsm_m rxsm(// Inputs
+                   .lastbit( v[0] ),
+                   /*AUTOINST*/
+                   // Outputs
+                   .bytercvd            (bytercvd),
+                   .rst4                (rst4),
+                   .c_ishift            (c_ishift),
+                   .rxst                (rxst[1:0]),
+                   // Inputs
+                   .clk                 (clk),
+                   .rxce                (rxce),
+                   .rxpin               (rxpin));
+   genvar        i;
+   wire [7:0]    c_sh;
+   wire [7:0]    v;
+
+   generate
+      for ( i = 0; i < 8; i = i + 1 ) begin : blk
+         SB_LUT4 #(.LUT_INIT(16'hbf80))
+         sh( .O(c_sh[i]), .I3(v[i]), .I2(rxst[1]), .I1(rxst[0]), 
+             .I0(i==7 ? rxpin:v[i+1]));
+         if ( i == 7 ) begin
+            SB_DFFESS 
+              shreg( .Q(v[i]), .C(clk), .S(c_ishift), .E(rxce), .D(c_sh[i]) );
+         end else begin
+            SB_DFFESR 
+              shreg( .Q(v[i]), .C(clk), .R(c_ishift), .E(rxce), .D(c_sh[i]) );
+         end
+      end
+
+      if ( HASRXBYTEREGISTER ) begin
+         wire [7:0] c_h,bytereg;
+         for ( i = 0; i < 8; i = i + 1 ) begin : blk2
+            SB_LUT4 #(.LUT_INIT(16'hcaca))
+            bt(.O(c_h[i]),.I3(1'b0),.I2(bytercvd), .I1(v[i]), .I0(bytereg[i]));
+            SB_DFF regbyte( .Q(bytereg[i]), .C(clk), .D(c_h[i]));            
+         end
+         assign q = bytereg;
+      end else begin
+         assign q = v;
+      end
+   endgenerate
+endmodule
+
+/* 
+ Some further comments and examples
+ ---------------------------------
+ 
+  Example for 12MHz clock, 115200:
+  5 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
  12 LogicCells for transmit part
      5 Prescaler /13 to get to 923 kHz
@@ -703,11 +665,11 @@ r_state[1] --(-+-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
                          needs a 14.1% eye-opening minimum.
  13    for bit clocks
  --------
- 47 LogicCells total.
- 39 LogicCells minimal version. Read no later than after 52 cycles.
+ 46 LogicCells total.
+ 38 LogicCells minimal version. Read no later than after 65 cycles.
  
- Exampler for 12MHz clock, 9600
-  6 LogicCells for rx state machine and control
+ Exampler for 12MHz clock, 9600:
+  5 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
  12 LogicCells for transmit part
      9  Prescaler /156 to get 76.923 kHz 
@@ -715,12 +677,13 @@ r_state[1] --(-+-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
      4  rxce counter 8/4  9615 bps, 1.6% error over a byte
  17     for bit clocks
  -------------
- 51 LogicCells total
- 43 LogicCells minimal. Read no later than after 625 cycles.
+ 50 LogicCells total
+ 42 LogicCells minimal. Read no later than after 780 cycles.
  
- Example to establish the worst case I can think anyone would attempt.
- Assume a 270 MHz clock, want 2400 bps.
-  6 LogicCells for rx state machine and control
+ Example to establish the worst case I can think anyone would attempt,
+ when it comes to implementation size. Assume a 270 MHz clock, want
+ 2400 bps.
+  5 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
  12 LogicCells for transmit part
     15  Prescaler /14062 to get a 192001 Hz clock enable (1 cycle)
@@ -728,11 +691,11 @@ r_state[1] --(-+-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
      4  rxce counter 8/4  2400 bps, 0.04% error over a byte.
  23     for bit clocks
  -------------
- 57 LogicCells total
+ 56 LogicCells total
 
- Minimum solution for this way to construct the counters:
- Assume system clock is 8 times bitrate:
-  6 LogicCells for rx state machine and control
+ Minimum solution for this way to construct the counters.  Assume
+ system clock is 8 times bitrate: 
+  5 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
  12 LogicCells for transmit part
      0  Prescaler
@@ -740,20 +703,24 @@ r_state[1] --(-+-----|    |  | | >  |  |      | +-| |0/ |  >_|  |
      4  rxce counter 8/4  9615 bps, 1.6% error over a byte
   8     for bit clocks
  -------------
- 42 LogicCells total
+ 41 LogicCells total
  
  The shift register is only shifted during reception, and is otherwise
- only changed when the receive state machine goes from ARMED to
- RCV. Logic using the receiver will know a byte is received when the
- receive state machine goes from GRACE to HUNT. The implication is
- that we are guaranteed that a received byte stay unmodified for 1/8 +
- 1/2 bit time. If it can be guaranteed that the *shiftregister* can be
- read in this time, we can remove the parallel holding register, and
- save 8 LogicCells. An example: At 12MHz, 115200 has a bit time of 104
- cycles. 1/8 bit time is 13 cycles, 1/2 bit time is 52 cycles.
+ only changed when the receive state machine goes from ARMED to RCV.
+ This maximizes the time available to latch the shift register. Logic
+ using the receiver will know a byte is received when the receive state
+ machine goes from GRACE to HUNT. The implication is that we are
+ guaranteed that a received byte stay unmodified for 1/8 + 1/2 bit time. 
+ If it can be guaranteed that the *shiftregister* can be read in this 
+ time, we can remove the parallel holding register, and save 8 
+ LogicCells. An example: At 12MHz, 115200 has a bit time of 104 cycles. 
+ 5/8 bit time is 65 cycles.
+
  
+ The following comments will apply to my small controller:
+ --------------------------------------------------------- 
  Interrupt response of a slow Epick must then be better than
- (13+52-2-10)/2 = 26 instructions, which should not be difficult to
+ (65-2-10)/2 = 26 instructions, which should not be difficult to
  acheive. Of cause, with a byte buffer we have 1041 clock cycles, 520
  instructions, to react.
  
