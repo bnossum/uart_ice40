@@ -533,18 +533,18 @@ endmodule
 bytereceived --------------------------------+--------------------- to INTF0
 rxce         ----------------+               |
                       ____   |               |    _____         
-rxpin ---------------|    |  |   __          +---|-+   |   _    
-r_state[0] --+-------|    |--(--|  |--+------(---|-|1\_|__| |__ ___ d[7]
-r_state[1] --(-+-----|    |  |  >  |  |      | +-| |0/ |  >_|  |
-             | |     |____|  |  |  |  |      | | |_____|       |
-             | |             +--CE_|  |      | +---------------+
+rxpin ---------------|I0  |  |   __          +---|-+   |   _    
+r_state[0] --+-------|I1  |--(--|  |--+------(---|-|1\_|__| |__ ___ d[7]
+r_state[1] --(-+-----|I2  |  |  >  |  |      | +-| |0/ |  >_|  |
+             | | +---|I3__|  |  |  |  |      | | |_____|       |
+             | | |           +--CE_|  |      | +---------------+
              | | +-----------(--------+      |
              | | |    ____   |               |    _____         
              | | +---|    |  |   __          +---|-+   |   _    
              +-(-----|    |--(--|  |--+------(---|-|1\_|__| |__ ___ d[6]
              | +-----|    |  |  >  |  |      | +-| |0/ |  >_|  |
-             | |     |____|  |  |  |  |      | | |_____|       |
-             | |             +--CE_|  |      | +---------------+
+             | | +---|____|  |  |  |  |      | | |_____|       |
+             | | |           +--CE_|  |      | +---------------+
              | | +-----------(--------+      |
              | | |           |               |
              : : :           |               :
@@ -553,16 +553,16 @@ r_state[1] --(-+-----|    |  |  >  |  |      | +-| |0/ |  >_|  |
              | | +---|    |  |   __          +---|-+   |   _    
              +-(-----|    |--(--|  |--+------(---|-|1\_|__| |__ ___ d[1]
              | +-----|    |  |  >  |  |      | +-| |0/ |  >_|  |
-             | |     |____|  |  |  |  |      | | |_____|       |
-             | |             +--CE_|  |      | +---------------+
+             | | +---|____|  |  |  |  |      | | |_____|       |
+             | | |           +--CE_|  |      | +---------------+
              | | +-----------|--------+      |
              | | |    ____   |               |    _____
              | | +---|    |  |   __          +---|-+   |   _
              +-(-----|    |--(--|  |--+----------|-|1\_|__| |__ ___ d[0]
                +-----|    |  |  >  |  |        +-| |0/ |  >_|  |
-                     |____|  |  |  |  |        | |_____|       |
-                             +--CE_|  |        +---------------+
-                                      +---------------------------- lastbit
+                 +---|____|  |  |  |  |        | |_____|       |
+                 |           +--CE_|  |        +---------------+
+                 +--------------------+---------------------------- lastbit
                                                Extra resources - 
                                                can free up the carry
                                                chain by using CE
@@ -592,8 +592,8 @@ endmodule
 /*
  The receive state machine is assembled together with the shift regiser,
  and (optionally) a 8-bit holding regiser.
- Should be   8+6 = 14 logic cells when HASRXBYTEREGISTER == 0
- Should be 8+8+6 = 22 logic cells when HASRXBYTEREGISTER == 1
+ Should be   8+4 = 12 logic cells when HASRXBYTEREGISTER == 0
+ Should be 8+8+4 = 20 logic cells when HASRXBYTEREGISTER == 1
  */
 module uartrx_m
   # (parameter HASRXBYTEREGISTER = 0 )
@@ -621,14 +621,16 @@ module uartrx_m
 
    generate
       for ( i = 0; i < 8; i = i + 1 ) begin : blk
-         localparam a = i == 7 ? 16'hbaba : 16'h8a8a;
+         localparam a = i == 7 ? 16'hbfb0 : 16'h8f80;
          SB_LUT4 #(.LUT_INIT(a))
-         sh( .O(c_sh[i]), .I3(1'b0), .I2(rxst[1]), .I1(rxst[0]), 
+         sh( .O(c_sh[i]), .I3(v[i]), .I2(rxst[1]), .I1(rxst[0]), 
              .I0(i==7 ? rxpin:v[i+1]));
          SB_DFFE  shreg( .Q(v[i]), .C(clk), .E(rxce), .D(c_sh[i]) );
       end
 
-      if ( HASRXBYTEREGISTER ) begin
+      if ( HASRXBYTEREGISTER == 0 ) begin
+         assign q = v;
+      end else begin
          wire [7:0] c_h,bytereg;
          for ( i = 0; i < 8; i = i + 1 ) begin : blk2
             SB_LUT4 #(.LUT_INIT(16'hcaca))
@@ -636,8 +638,6 @@ module uartrx_m
             SB_DFF regbyte( .Q(bytereg[i]), .C(clk), .D(c_h[i]));            
          end
          assign q = bytereg;
-      end else begin
-         assign q = v;
       end
    endgenerate
 endmodule
@@ -711,10 +711,11 @@ endmodule
  
  The following comments will apply to my small controller:
  --------------------------------------------------------- 
- Interrupt response of a slow Epick must then be better than
- (65-2-10)/2 = 26 instructions, which should not be difficult to
- acheive. Of cause, with a byte buffer we have 1041 clock cycles, 520
- instructions, to react.
+ Assume a 12 MHz clock, and a transmission at 115200. Interrupt
+ response of a slow Epick must then be better than (65-2-10)/2 = 26
+ instructions, which should not be difficult to acheive. Of cause,
+ with a byte buffer we have 1041 clock cycles, 520 instructions, to
+ react.
  
  example1_ISR:; ISR with read into a circular buffer
      bcf     INTCON,4 ;  Clear (the only) interrupt source
