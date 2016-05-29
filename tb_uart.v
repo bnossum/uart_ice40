@@ -13,7 +13,7 @@
 module tst;
    reg clk;
    reg [15:0] cyclecounter,simtocy;
-   reg        load;
+   reg        load,bytercvd_dly1;
    wire       cte1,rxpin;
    wire [7:0] d;
    /*AUTOWIRE*/
@@ -47,21 +47,22 @@ module tst;
          $finish;
       end
       load <= ( cyclecounter == 333 ) ? 1'b1 : 1'b0;
-      
-      if ( bytercvd ) begin
+
+      bytercvd_dly1 <= bytercvd;
+      if ( bytercvd_dly1 ) begin
          if ( q != 8'h41 ) begin
             $display( "Something is wrong" );
             $finish;
          end else begin
             $display( "Success" );
-            simtocy <= cyclecounter+500;
+            simtocy <= cyclecounter+100;
          end
       end
    end
 
    // Device under test
    uart_m
-     #( .HASRXBYTEREGISTER(1'b0))
+     #( .HASRXBYTEREGISTER(1'b1))
      dut
      (/*AUTOINST*/
       // Outputs

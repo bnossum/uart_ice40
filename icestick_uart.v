@@ -1,4 +1,12 @@
 /* Top level that just instantiates a UART in loopback mode in an icestick.
+ * Assumtions: 12M clock. 115200 bps. 8N1 format.
+ * 
+ * LogicCells:
+ * 38 for uart proper
+ *  1 for metastability removal rxpin
+ *  1 for generation of constant 1'b1.
+ * -------
+ * 40 logicCells in total
  * 
  * WARNING - not tested yet! Do not use yet!
  * 
@@ -27,7 +35,7 @@ module top
    // End of automatics
 
    // One LUT consumed to get a constant 1.
-   // Work. Get constant 1 from an unbonded pad instead.
+   // May get constant 1 from an unbonded pad instead.
    assign cte1 = 1'b1; 
 
    // Clock pin
