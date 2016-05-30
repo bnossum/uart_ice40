@@ -242,7 +242,14 @@ endmodule
  The main idea here is to have a 10-bit shift register. When all bits
  are shifted out, a fact we find from the carry chain, transmission is
  done. 
+
+ We also need a FF to synchronize "load" with "txce". We could skip
+ this, it would imply a 1/8 bit period uncertainty in the length of
+ the start bit. Even if this uart is very spartan, I do not want to
+ degrade the performance, so this FF stays.
  
+ We also need a FF to record that the shift regiser is busy.
+  
 loadORtxce -------------------+
 load                _____     |
     +--------------|I0   |    |   ___                     
@@ -663,8 +670,8 @@ endmodule
  ---------------------
  Nr Type ClockEnable     Logic construction 
  12 DFFE (loadORtxce)    uarttx   12
- 10 DFFE (rxce)          uartrxsm  2 / uartrx 8
- 15 DFF                  rxtxdiv   7 / uartrx 8
+ 16 DFFE (rxce)          uartrxsm  2 / uartrx 8+6
+  9 DFF                  rxtxdiv   7 / uartrx 2
 
  Examples
  -------- 

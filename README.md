@@ -1,5 +1,5 @@
 # uart_ice40
-Minimal uart for ice40 FPGAs, in Verilog.
+Minimal size uart for ice40 FPGAs, written in Verilog, between 32 and 55 logicCells.
 
 There is much simulation still to do, and the uart has never been on hardware.
 
