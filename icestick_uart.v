@@ -51,14 +51,14 @@ module top
        .D_OUT_0(txpin) );
 
    // txbusy to LED0
-   SB_IO #( .PIN_TYPE(6'b011111)) // OUTPUT_REGISTERED_INVERTED/INPUT_LATCH
+   SB_IO #( .PIN_TYPE(6'b010111)) // OUTPUT_REGISTERED/INPUT_LATCH
    IO_txbusy
      ( .PACKAGE_PIN(PIO1_14),
        .OUTPUT_CLK(clk),
        .D_OUT_0(txbusy) );
 
    // bitx8ce to J2 pin 1 for debugging
-   SB_IO #( .PIN_TYPE(6'b011111)) // OUTPUT_REGISTERED_INVERTED/INPUT_LATCH
+   SB_IO #( .PIN_TYPE(6'b010111)) // OUTPUT_REGISTERED/INPUT_LATCH
    IO_bitx8ce
      ( .PACKAGE_PIN(PIO1_02),
        .OUTPUT_CLK(clk),
@@ -76,7 +76,7 @@ module top
    cmb( .O(c_rxpinmeta1), .I3(1'b0), .I2(1'b0), .I1(1'b0), .I0(rxpinmeta1));
    SB_DFF metareg( .Q(rxpin), .C(clk), .D(c_rxpinmeta1));
    
-   uart_m #(.SYSCLKFRQ(12000000), .BITCLKFRQ(115200), 
+   uart_m #(.SYSCLKFRQ(12000000), .BITCLKFRQ(9600), 
             .ACCEPTEDERROR_IN_PERCENT(20), .HASRXBYTEREGISTER(0) )
    uart
      (/*AUTOINST*/

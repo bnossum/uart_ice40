@@ -42,7 +42,7 @@
  *     is busy receiving the next byte. If HASRXBYTEREGISTER is false 
  *     the received byte is read directly from the shift register.
  *     In that case 8 logic cells are saved, but the byte must be
- *     read in less than 5/8 bit transfer time. It is reccommended to
+ *     read in less than 5/8 bit transfer time. It is recommended to
  *     set HASRXBYTEREGISTER == 1.
  *   - ACCEPTEDERROR_IN_PERCENT determine if it is possible to reach
  *     a required quality on the actual bitrate compared to the
@@ -182,13 +182,13 @@ module prediv_m
     * 
     * I arrange for the predivider to be a counter that uses the carry
     * chain. The final carry out is registered, and this is the result
-    * of the prescaler. The predivider is amn up=counter.
+    * of the prescaler. The predivider is an up-counter.
     * 
     * Work. During simulation, pay attention to corner-cases. Loading of 0
     * count length multiple of (1<<x), etc.
     */
 
-   assign prediv_m_dummy = clk; // Vanity: Avoid a warning
+   assign prediv_m_dummy = clk; // Vanity: Avoid a warning when PREDIVIDE_m == 0
    generate
       if ( (REL_ERR_OVER_FRAME_IN_PERCENT > ACCEPTEDERROR_IN_PERCENT)
            || (PREDIVIDE_m1 < 0)
@@ -352,7 +352,7 @@ module uarttx_m
    (
     input       clk,cte1,load,loadORtxce,
     input [7:0] d,
-    output      txpin, // To be connected to a pad with INVERTED output.
+    output      txpin, 
     output      txbusy
     );
    genvar       i;
@@ -418,13 +418,13 @@ endmodule
         |                                       
       /cy\                                      
  rst4--(((---- I0                         __
- 0   --+((---- I1   rst4&(cnt1^cy)    ---|  |-- cnt1
+ 0   --+((---- I1   ~rst4&(cnt1^cy)   ---|  |-- cnt1
  cnt1 --(+---- I2                        >__|
         +----- I3
         |
       /cy\ 
  rst4--(((---- I0                         __
- 0   --+((---- I1   rst4&(cnt0^cy)    ---|  |-- cnt0
+ 0   --+((---- I1   ~rst4&(cnt0^ce)   ---|  |-- cnt0
  cnt0 --(+---- I2                        >__|
         +----- I3
         | ce
@@ -512,31 +512,31 @@ endmodule
           +---rxpin   |+------ NextState[0]                 HUNT  00 
           |+--lastbit || +---- bytercvd                     ARMD  10 
           ||rxce      || |+--- Initshiftreg                 RECV  11 
-          |||         || ||+-- Nrst4                        GRCE  01
+          |||         || ||+-- rst4                         GRCE  01
   State   |||         || |||   Comment
-  -----DC BA----------DC--------------------------
-  HUNT 00 1xx         00 000   HUNT   
+  -----DC BAa---------DC--------------------------
+  HUNT 00 1xx         00 001   HUNT   
   HUNT 00 0x0         10 001   HUNT
   HUNT 00 0x1         10 000   ARMD   Nrst4 actually used
-  ARMD 10 xx0         10 001   ARMD
-  ARMD 10 0x1         11 011   RECV   
+  ARMD 10 xx0         10 000   ARMD
+  ARMD 10 0x1         11 010   RECV   
   ARMD 10 1x1         00 000   HUNT   False start bit
-  RECV 11 xx0         11 001   RECV   
-  RECV 11 x01         11 001   RECV   
-  RECV 11 x11         01 001   GRCE   
-  GRCE 01 xx0         00 001   GRCE
-  GRCE 01 0x1         00 000   HUNT   Frame bit not right, reject byte
-  GRCE 01 1x1         00 100   HUNT   
+  RECV 11 xx0         11 000   RECV   
+  RECV 11 x01         11 000   RECV   
+  RECV 11 x11         01 000   GRCE   
+  GRCE 01 xx0         00 000   GRCE
+  GRCE 01 0x1         00 001   HUNT   Frame bit not right, reject byte
+  GRCE 01 1x1         00 101   HUNT   
   
  c_NextState[1] =  DCBA == x00x |  DCBA == 11x0
  c_NextState[0] =  DCBA == 100x |  DCBA == 11xx
-   rst4         =  DCBA == 0001
+   rst4         =  DCBa == 0001
    bytercvd     =  DCBA == 011x && rxce
   (initshiftreg =  DCBA == 100x && rxce)
    
  Shift shift register right in state RECV, qualified with rxce
  When initshiftreg == 1, load sh[7:0] == 0x80 (qualified with rxce).
- To save resources, the initshiftreg equation is propagated to the
+ To save one LUT, the initshiftreg equation is propagated to the
  LUTs used to constitute the shift regiser.
  
  rxst msb    other_bits
@@ -551,16 +551,14 @@ rxce         ----------------+               |
 rxpin ---------------|I0  |  |   __          +---|-+   |   _    
 rxst[0] -----+-------|I1  |--(--|  |--+------(---|-|1\_|__| |__ ___ d[7]
 rxst[1] -----(-+-----|I2  |  |  >  |  |      | +-| |0/ |  >_|  |
-             | | +---|I3__|  |  |  |  |      | | |_____|       |
-             | | |           +--CE_|  |      | +---------------+
-             | | +-----------(--------+      |
+             | | +---|I3__|  +--CE_|  |      | | |_____|       |
+             | | +-----------(--------+      | +---------------+
              | | |    ____   |               |    _____         
              | | +---|    |  |   __          +---|-+   |   _    
              +-(-----|    |--(--|  |--+------(---|-|1\_|__| |__ ___ d[6]
              | +-----|    |  |  >  |  |      | +-| |0/ |  >_|  |
-             | | +---|____|  |  |  |  |      | | |_____|       |
-             | | |           +--CE_|  |      | +---------------+
-             | | +-----------(--------+      |
+             | | +---|____|  +--CE_|  |      | | |_____|       |
+             | | +-----------(--------+      | +---------------+
              | | |           |               |
              : : :           |               :
              | |             |               |
@@ -568,20 +566,19 @@ rxst[1] -----(-+-----|I2  |  |  >  |  |      | +-| |0/ |  >_|  |
              | | +---|    |  |   __          +---|-+   |   _    
              +-(-----|    |--(--|  |--+------(---|-|1\_|__| |__ ___ d[1]
              | +-----|    |  |  >  |  |      | +-| |0/ |  >_|  |
-             | | +---|____|  |  |  |  |      | | |_____|       |
-             | | |           +--CE_|  |      | +---------------+
-             | | +-----------|--------+      |
+             | | +---|____|  +--CE_|  |      | | |_____|       |
+             | | +-----------(--------+      | +---------------+
              | | |    ____   |               |    _____
              | | +---|    |  |   __          +---|-+   |   _
              +-(-----|    |--(--|  |--+----------|-|1\_|__| |__ ___ d[0]
                +-----|    |  |  >  |  |        +-| |0/ |  >_|  |
-                 +---|____|  |  |  |  |        | |_____|       |
-                 |           +--CE_|  |        +---------------+
+                 +---|____|  +--CE_|  |        | |_____|       |
+                 |                    |        +---------------+
                  +--------------------+---------------------------- lastbit
                                                Extra resources - 
                                                can free up the carry
-                                               chain by using CE
-                                               to these registers.
+                                               chain by using rxce as 
+                                               CE to these registers.
 */
 module uartrxsm_m
   (
@@ -594,14 +591,14 @@ module uartrxsm_m
    SB_LUT4 #(.LUT_INIT(16'h5303))
    stnxt1_i( .O(nxt_rxst[1]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(lastbit));
    SB_LUT4 #(.LUT_INIT(16'hf300))
-   stnxt0_i(.O(nxt_rxst[0]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin),.I0(1'b0));
+   stnxt0_i( .O(nxt_rxst[0]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin),.I0(1'b0));
    SB_DFFE r_st0( .Q(rxst[0]), .C(clk), .E(rxce), .D(nxt_rxst[0]));
    SB_DFFE r_st1( .Q(rxst[1]), .C(clk), .E(rxce), .D(nxt_rxst[1]));
 
    SB_LUT4 #(.LUT_INIT(16'h0080))
    bytercvd_i( .O(bytercvd), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
-   SB_LUT4 #(.LUT_INIT(16'h0002))
-   rst4_i( .O(rst4), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
+   SB_LUT4 #(.LUT_INIT(16'h1111))
+   rst4_i( .O(rst4), .I3(1'b0), .I2(1'b0), .I1(rxst[1]), .I0(rxst[0]));
 endmodule
 
 //////////////////////////////////////////////////////////////////////////////

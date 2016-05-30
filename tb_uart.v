@@ -48,8 +48,7 @@ module tst;
            $display( "Simulation went off the rails" );
          $finish;
       end
-      load <= ( cyclecounter == 333 ||
-                cyclecounter == 1555 )
+      load <= ( cyclecounter == 333 || cyclecounter == 1640 )
                 ? 1'b1 : 1'b0;
       if ( cyclecounter == 300 )
         d <= 8'h41;
