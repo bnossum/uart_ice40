@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-/* An uart specifically for iCE40, in 33 or 41 logic cells, predivider
+/* An uart specifically for iCE40, in 32 or 40 logic cells, predivider
  * not included. Typical total size is 50 logicCells or below.  The uart
  * is really minimal, and can't do all the things the Lattice 16550
  * reference design can do.  On the other hand, it is less than 1/10th 
@@ -503,7 +503,7 @@ endmodule
               Inputs          Next/Outputs                 State encoding:
                       +------ NextState[1]
           +---rxpin   |+------ NextState[0]                 HUNT  00 
-          |+--lastbit || +---- ByteReceived                 ARMD  10 
+          |+--lastbit || +---- bytercvd                     ARMD  10 
           ||rxce      || |+--- Initshiftreg                 RECV  11 
           |||         || ||+-- Nrst4                        GRCE  01
   State   |||         || |||   Comment
@@ -523,19 +523,27 @@ endmodule
   
  c_NextState[1] =  DCBA == x00x |  DCBA == 11x0
  c_NextState[0] =  DCBA == 100x |  DCBA == 11xx
- c_ByteReceived =  DCBA == 011x && rxce
- c_Initshiftreg =  DCBA == 100x && rxce
- c_rst4         =  DCBA == 0001
+   rst4         =  DCBA == 0001
+   bytercvd     =  DCBA == 011x && rxce
+  (initshiftreg =  DCBA == 100x && rxce)
    
  Shift shift register right in state RECV, qualified with rxce
  When initshiftreg == 1, load sh[7:0] == 0x80 (qualified with rxce).
+ To save resources, the initshiftreg equation is propagated to the
+ LUTs used to constitute the shift regiser.
+ 
+ rxst msb    other_bits
+ 00   hold   hold
+ 01   hold   hold
+ 10   1      0
+ 11   shift  shift
    
-bytereceived --------------------------------+--------------------- to INTF0
+bytercvd     --------------------------------+--------------------- to INTF0
 rxce         ----------------+               |
                       ____   |               |    _____         
 rxpin ---------------|I0  |  |   __          +---|-+   |   _    
-r_state[0] --+-------|I1  |--(--|  |--+------(---|-|1\_|__| |__ ___ d[7]
-r_state[1] --(-+-----|I2  |  |  >  |  |      | +-| |0/ |  >_|  |
+rxst[0] -----+-------|I1  |--(--|  |--+------(---|-|1\_|__| |__ ___ d[7]
+rxst[1] -----(-+-----|I2  |  |  >  |  |      | +-| |0/ |  >_|  |
              | | +---|I3__|  |  |  |  |      | | |_____|       |
              | | |           +--CE_|  |      | +---------------+
              | | +-----------(--------+      |
@@ -578,12 +586,13 @@ module uartrxsm_m
    
    SB_LUT4 #(.LUT_INIT(16'h5303))
    stnxt1_i( .O(nxt_rxst[1]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(lastbit));
-   SB_LUT4 #(.LUT_INIT(16'h0080))
-   bytercvd_i( .O(bytercvd), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
    SB_LUT4 #(.LUT_INIT(16'hf300))
    stnxt0_i(.O(nxt_rxst[0]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin),.I0(1'b0));
    SB_DFFE r_st0( .Q(rxst[0]), .C(clk), .E(rxce), .D(nxt_rxst[0]));
    SB_DFFE r_st1( .Q(rxst[1]), .C(clk), .E(rxce), .D(nxt_rxst[1]));
+
+   SB_LUT4 #(.LUT_INIT(16'h0080))
+   bytercvd_i( .O(bytercvd), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
    SB_LUT4 #(.LUT_INIT(16'h0002))
    rst4_i( .O(rst4), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
 endmodule
@@ -594,6 +603,10 @@ endmodule
  and (optionally) a 8-bit holding regiser.
  Should be   8+4 = 12 logic cells when HASRXBYTEREGISTER == 0
  Should be 8+8+4 = 20 logic cells when HASRXBYTEREGISTER == 1
+ 
+ The holding register, if present, has 6 bits that are qualified with
+ rxce. This is not logically required, but may lead to better
+ placement. 
  */
 module uartrx_m
   # (parameter HASRXBYTEREGISTER = 0 )
@@ -635,7 +648,10 @@ module uartrx_m
          for ( i = 0; i < 8; i = i + 1 ) begin : blk2
             SB_LUT4 #(.LUT_INIT(16'hcaca))
             bt(.O(c_h[i]),.I3(1'b0),.I2(bytercvd), .I1(v[i]), .I0(bytereg[i]));
-            SB_DFF regbyte( .Q(bytereg[i]), .C(clk), .D(c_h[i]));            
+            if ( i < 6 )
+              SB_DFFE regbyteA( .Q(bytereg[i]), .C(clk), .E(rxce), .D(c_h[i]));
+            else
+              SB_DFF regbyteB( .Q(bytereg[i]), .C(clk), .D(c_h[i]));            
          end
          assign q = bytereg;
       end
@@ -643,10 +659,16 @@ module uartrx_m
 endmodule
 
 /* 
- Some further comments and examples
- ---------------------------------
- 
-  Example for 12MHz clock, 115200:
+ Resource usage FF
+ ---------------------
+ Nr Type ClockEnable     Logic construction 
+ 12 DFFE (loadORtxce)    uarttx   12
+ 10 DFFE (rxce)          uartrxsm  2 / uartrx 8
+ 15 DFF                  rxtxdiv   7 / uartrx 8
+
+ Examples
+ -------- 
+ Example for 12MHz clock, 115200:
   4 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
  12 LogicCells for transmit part
@@ -659,7 +681,7 @@ endmodule
  45 LogicCells total.
  37 LogicCells minimal version. Read no later than after 65 cycles.
  
- Exampler for 12MHz clock, 9600:
+ Example for 12MHz clock, 9600:
   4 LogicCells for rx state machine and control
  16 LogicCells for receive bit shiftregister and byte holding register.
  12 LogicCells for transmit part
