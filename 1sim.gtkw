@@ -1,21 +1,23 @@
 [*]
 [*] GTKWave Analyzer v3.3.34 (w)1999-2012 BSI
-[*] Mon May 30 09:38:59 2016
+[*] Tue May 31 07:05:20 2016
 [*]
 [dumpfile] "/home/bnossum/GITSTUFF/GIT/uart_ice40/tst.lxt"
-[dumpfile_mtime] "Mon May 30 09:37:49 2016"
-[dumpfile_size] 291271
+[dumpfile_mtime] "Tue May 31 06:50:40 2016"
+[dumpfile_size] 114214
 [savefile] "/home/bnossum/GITSTUFF/GIT/uart_ice40/1sim.gtkw"
-[timestart] 0
+[timestart] 12131
 [size] 1920 1052
 [pos] -1 -1
-*-13.910592 70902 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+*-8.505944 13416 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
 [treeopen] tst.
 [treeopen] tst.dut.
+[treeopen] tst.dut.uartrx_i.
+[treeopen] tst.dut.uarttx_i.
 [sst_width] 223
-[signals_width] 174
+[signals_width] 310
 [sst_expanded] 1
-[sst_vpaned_height] 311
+[sst_vpaned_height] 608
 @28
 tst.dut.clk[0]
 @22
@@ -31,34 +33,23 @@ tst.txbusy[0]
 tst.rxpin[0]
 tst.dut.uartrx_i.rxce[0]
 @2024
-^1 /tmp/../home/bnossum/GITSTUFF/GIT/uart_ice40/gktxlat.txt
+^1 /tmp/../home/bnossum/GITSTUFF/GIT/uart_ice40/../../../../../tmp/../home/bnossum/GITSTUFF/GIT/uart_ice40/gktxlat.txt
 tst.dut.uartrx_i.rxst[1:0]
 @28
-tst.dut.uartrx_i.rst4[0]
 tst.dut.uartrx_i.rxst[1:0]
+@29
+tst.dut.uartrx_i.rxsm.nxt_rxst[1:0]
+@28
+tst.dut.uartrx_i.rxsm.lastbit[0]
 tst.dut.uartrx_i.bytercvd[0]
 tst.dut.rxtxdiv_i.cnt[2:0]
 @8028
 tst.dut.rxtxdiv_i.cnt[2:0]
-@23
+@22
 tst.dut.uartrx_i.v[7:0]
 @20000
 -
 @28
-tst.dut.rxtxdiv_i.bitx8ce[0]
-tst.dut.rxtxdiv_i.c_cnt[2:0]
-tst.dut.rxtxdiv_i.c_rxce[0]
-tst.dut.rxtxdiv_i.c_tnt[2:0]
-tst.dut.rxtxdiv_i.clk[0]
-tst.dut.rxtxdiv_i.cnt[2:0]
-@22
-tst.dut.rxtxdiv_i.cy[7:1]
-@28
-tst.dut.rxtxdiv_i.loadORtxce[0]
-tst.dut.rxtxdiv_i.load[0]
 tst.dut.rxtxdiv_i.rst4[0]
-tst.dut.rxtxdiv_i.rxce[0]
-tst.dut.rxtxdiv_i.rxst[1:0]
-tst.dut.rxtxdiv_i.tnt[2:0]
 [pattern_trace] 1
 [pattern_trace] 0

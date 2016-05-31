@@ -7,7 +7,7 @@
  * 
  * Usage:
  * o Input rxpin is intended to originate from a physical pin, but can
- *   really come from anywhere. This input must have been clocked
+ *   come from anywhere. This input must have been clocked
  *   through two ff's, to reduce chances of metastability.
  * o Output txpin is intended to be connected to a physical pin,
  *   where the output is *inverted*. The output of the uart is
@@ -73,6 +73,7 @@ module uart_m
         output       bytercvd, // Status receive. True 1 bit period cycle only
         output [7:0] q //         Received byte from serial receive/byte buffer
         );
+   localparam integer PREDIVIDE_m1 = ((2*SYSCLKFRQ+1) / (BITCLKFRQ*8*2)) - 1;
    /*AUTOWIRE*/
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
    wire                 loadORtxce;             // From rxtxdiv_i of rxtxdiv_m.v
@@ -102,7 +103,8 @@ module uart_m
       .clk                              (clk),
       .rxce                             (rxce),
       .rxpin                            (rxpin));
-   rxtxdiv_m rxtxdiv_i
+   rxtxdiv_m #(.PREDIVIDE_m1(PREDIVIDE_m1))
+     rxtxdiv_i
      (/*AUTOINST*/
       // Outputs
       .loadORtxce                       (loadORtxce),
@@ -158,12 +160,12 @@ module prediv_m
      BITCLKFRQ = 115200, /*             Bit Clock Frequency in Hz    */
      ACCEPTEDERROR_IN_PERCENT = 20  /*  How accurate must we be?     */
      ) (
-        input  clk,
-        output bitx8ce,prediv_m_dummy
+        input       clk, 
+        output      bitx8ce,prediv_m_dummy
         );
-   wire        r_tc;
    localparam real    F_IDEALPREDIVIDE = SYSCLKFRQ / (BITCLKFRQ*8.0);
-   localparam integer PREDIVIDE = (2*SYSCLKFRQ+1) / (BITCLKFRQ*8*2); // What are rules of rounding in Verilog? Truncate?
+   // Rules of rounding in Verilog seems to be truncate
+   localparam integer PREDIVIDE = (SYSCLKFRQ+4) / (BITCLKFRQ*8); 
    localparam real    RESULTING_BITFRQ = SYSCLKFRQ / (PREDIVIDE*8.0);
    localparam real    REL_ERR = RESULTING_BITFRQ > BITCLKFRQ ?
                       (RESULTING_BITFRQ - BITCLKFRQ)/BITCLKFRQ :
@@ -199,8 +201,10 @@ module prediv_m
       if ( PREDIVIDE_m1 == 0 ) begin
          assign bitx8ce = 1'b1; // No prescaler needed. 
       end else begin
-         genvar             j;
          wire [15:0]        cy,c_cnt,r_cnt;
+         wire               c_tc,r_tc;
+         genvar             j;
+         
          assign cy[0] = 1'b1;
          for ( j = 0; PREDIVIDE_m1 >> j; j = j + 1 ) begin
             localparam b = (PRED_initval >> j);
@@ -404,12 +408,16 @@ endmodule
   
  Also want a freerunning 3-bit counter, but resettable to half-full. 
  We do this with an upcounter. This is the receive clock enable.
-  
-               __________________           
- rxstate[0] --| I0 (rxcy & ce) | |        __        
- rxstate[1] --| I1 (GRCE & rxpin)|-------|  |-- rxce
- rxpin -------| I2               |       >__|       
-        +-----|_I3_______________|
+ 
+               PREDIVIDE_m1 != 0 |                PREDIVIDE_m1 == 0:
+               (rxcy & ce) |     |                ((ARMD | RECV) & ce) |
+               (GRCE & rxpin)    |                (GRCE & rxpin)       |
+                                 |                (HUNT & rxpin)
+               ____              |                ____             
+ rxstate[0] --| I0 |  __         |  rxstate[0] --| I0 |  __        
+ rxstate[1] --| I1 |-|  |- rxce  |  rxstate[1] --| I1 |-|  |- rxce 
+ rxpin -------| I2 | >__|        |  rxpin -------| I2 | >__|       
+        +-----|_I3_|             |         +-----|_I3_|            
         |
         | rxcy & ce   "(receive count overflow, or rst4) & bitx8ce" 
       /cy\                                      
@@ -468,6 +476,7 @@ rxst[1]-(---   I3
  * In addition rst4, placed here to save a LUT.
  */
 module rxtxdiv_m
+  #( parameter PREDIVIDE_m1 = 44)
   (
    input       clk,bitx8ce,load,rxpin,
    input [1:0] rxst,
@@ -508,17 +517,13 @@ module rxtxdiv_m
    SB_DFF reg6( .Q(cnt[2]), .C(clk), .D(c_cnt[2]));
 
    SB_LUT4 #(.LUT_INIT(16'h0055))
-   i_ff(.O(rst4), .I3(rxst[1]),             .I2(1'b0),.I1(bitx8ce), .I0(rxst[0]));
+   i_rst(.O(rst4), .I3(rxst[1]),             .I2(1'b0),.I1(bitx8ce), .I0(rxst[0]));
    SB_CARRY i_andcy(.CO(cy[8]), .CI(cy[7]), .I1(1'b0),.I0(bitx8ce));
-   SB_LUT4 #(.LUT_INIT(16'hff20))
-   i_rxce( .O(c_rxce), .I3(cy[8]), .I2(rxpin), .I1(rxst[1]), .I0(rxst[0]));
-
-//   assign c_rxce = cy[8] | (rxst == 2'b01 & rxpin);
-
-//   SB_LUT4 #(.LUT_INIT(16'hff0b))
-//   i_cnt3(.O(c_prerxce), .I3(cy[7]), .I2(rxst[1]),.I1(rxst[0]), .I0(rxpin));
-//   SB_LUT4 #(.LUT_INIT(16'h8888))
-//   i_and2(.O(c_rxce), .I3(1'b0), .I2(1'b0),.I1(bitx8ce),.I0(c_prerxce));
+   generate 
+      localparam v = PREDIVIDE_m1 == 0 ? 16'hfc30 : 16'hff20;
+      SB_LUT4 #(.LUT_INIT(v))
+      i_rxce( .O(c_rxce), .I3(cy[8]), .I2(rxpin), .I1(rxst[1]), .I0(rxst[0]));
+   endgenerate
    SB_DFF regrxce( .Q(rxce), .C(clk), .D(c_rxce));
 endmodule
 
