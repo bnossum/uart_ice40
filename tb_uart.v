@@ -11,22 +11,25 @@
  */
 
 module tst;
-   reg clk;
-   reg [15:0] cyclecounter,simtocy;
+   reg [15:0] cyclecounter,simtocy,tx_cyclecounter;
    reg        load,bytercvd_dly1;
    wire       cte1,rxpin;
    reg [7:0]  d;
    reg        seenB;
+   localparam char1 = 8'hc1, char2 = 8'h4e;   
+   reg        base_clk;
+   reg        rx_clk;
+   reg        tx_clk;
+   
    /*AUTOWIRE*/
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
-   wire                 bitx8ce;                // From dut of uart_m.v
-   wire                 bytercvd;               // From dut of uart_m.v
-   wire [7:0]           q;                      // From dut of uart_m.v
-   wire                 txbusy;                 // From dut of uart_m.v
-   wire                 txpin;                  // From dut of uart_m.v
+   wire                 bytercvd;               // From dut_rx of uart_m.v
+   wire [7:0]           q;                      // From dut_rx of uart_m.v
+   wire                 txbusy;                 // From dut_tx of uart_m.v
+   wire                 txpin;                  // From dut_tx of uart_m.v
    // End of automatics
    
-   always # 20 clk = ~clk;
+   always # 20 base_clk = ~base_clk;
    assign cte1 = 1'b1;
 
    
@@ -34,65 +37,111 @@ module tst;
    initial begin
       $dumpfile("tst.lxt");
       $dumpvars(0,tst);
-      simtocy = 3000;
-      clk <= 0;
+      simtocy = 6000;
+      tx_clk <= 0;
+      rx_clk <= 0;
+      base_clk <= 0;
       cyclecounter <= 0;
+      tx_cyclecounter <= 0;
       load <= 0;    
-      seenB <= 0;  
+      seenB <= 0;
+      d <= 0;
    end
 
-   always @(posedge clk) begin
+   always @(posedge base_clk ) begin
       cyclecounter <= cyclecounter+1;
       if ( cyclecounter > simtocy ) begin
-         if ( simtocy == 3000 )
+         if ( simtocy == 6000 )
            $display( "Simulation went off the rails" );
          $finish;
       end
-      load <= ( cyclecounter == 333 || cyclecounter == 1640 )
-                ? 1'b1 : 1'b0;
-      if ( cyclecounter == 300 )
-        d <= 8'h41;
-      else if ( cyclecounter == 400 )
-        d <= 8'h4e;
-      
+      tx_clk <= ~tx_clk;
+      if ( cyclecounter > 107 )
+        rx_clk <= ~rx_clk;
+   end
+   
+   always @(posedge tx_clk) begin
+      tx_cyclecounter <= tx_cyclecounter + 1;
+      load <= ( tx_cyclecounter == 654 || tx_cyclecounter == 2222 )
+        ? 1'b1 : 1'b0;
+      if ( tx_cyclecounter == 560 ) begin
+         d <= char1;
+      end else if ( tx_cyclecounter == 800 ) begin
+         d <= char2;
+      end
+   end
+   
+   always @(posedge rx_clk) begin
       bytercvd_dly1 <= bytercvd;
       if ( bytercvd_dly1 ) begin
          if ( seenB ) begin
-            if ( q != 8'h4e ) begin
+            if ( q != char2 ) begin
                $display( "Something wrong2" );
                $finish;
             end else begin              
                $display( "Success" );
-               simtocy <= cyclecounter+200;
+               simtocy <= cyclecounter+400;
             end
          end else begin
-            if ( q != 8'h41 ) begin
+            if ( q != char1 ) begin
                $display( "Something is wrong" );
                $finish;
             end else begin
+               //$display("HERE");
                seenB <= 1;
             end
          end
       end
    end
 
-   // Device under test
+   wire dummy_txpin, dummy_txbusy, dummy_bytercvd;
+   wire bitx8ce_rx, bitx8ce_tx, dummy_rxpin;
+   wire [7:0] dummy_q;
+   
+   // Device under test. We have two, we let one be a tx, the other a rx.
+   // The reason we have two devices, is that I want to test different
+   // phases of the clocks.
+   assign dummy_rxpin = 0;
    uart_m
-     #( .HASRXBYTEREGISTER(1'b1))
-     dut
-     (/*AUTOINST*/
+     #( .SYSCLKFRQ(128), .BITCLKFRQ(4), .HASRXBYTEREGISTER(1'b1))
+   //     #( .SYSCLKFRQ(12000000), .BITCLKFRQ(115200), .HASRXBYTEREGISTER(1'b1))
+   dut_tx
+     (// Outputs
+      .bytercvd(dummy_bytercvd),
+      .q                                (dummy_q[7:0]),
+      .bitx8ce                          (bitx8ce_tx),
+      // Inputs
+      .rxpin                            (dummy_rxpin),
+      .clk                              (tx_clk),
+      /*AUTOINST*/
       // Outputs
       .txpin                            (txpin),
       .txbusy                           (txbusy),
-      .bitx8ce                          (bitx8ce),
+      // Inputs
+      .cte1                             (cte1),
+      .load                             (load),
+      .d                                (d[7:0]));
+   
+   uart_m
+     #( .SYSCLKFRQ(128), .BITCLKFRQ(4), .HASRXBYTEREGISTER(1'b1))
+   //     #( .SYSCLKFRQ(12000000), .BITCLKFRQ(115200), .HASRXBYTEREGISTER(1'b1))
+   dut_rx
+     (// Outputs
+      .txpin(    dummy_txpin    ),
+      .txbusy(   dummy_txbusy   ),
+      .bitx8ce(  bitx8ce_rx  ),
+      // Inputs
+      .clk (rx_clk ),
+      .load( 1'b0 ),
+      .d (0),
+      /*AUTOINST*/
+      // Outputs
       .bytercvd                         (bytercvd),
       .q                                (q[7:0]),
       // Inputs
-      .clk                              (clk),
       .cte1                             (cte1),
-      .load                             (load),
-      .d                                (d[7:0]),
       .rxpin                            (rxpin));
+   
    // Bit-serial loopback. Pads not simulated, so txpin inverted here.
    assign rxpin = ~txpin; 
 endmodule
