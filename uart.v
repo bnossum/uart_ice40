@@ -77,7 +77,7 @@ module uart_m
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
    wire                 loadORtxce;             // From rxtxdiv_i of rxtxdiv_m.v
    wire                 prediv_m_dummy;         // From prediv_i of prediv_m.v
-   wire                 rst4;                   // From uartrx_i of uartrx_m.v
+   wire                 rst4;                   // From rxtxdiv_i of rxtxdiv_m.v
    wire                 rxce;                   // From rxtxdiv_i of rxtxdiv_m.v
    wire [1:0]           rxst;                   // From uartrx_i of uartrx_m.v
    // End of automatics
@@ -96,7 +96,6 @@ module uart_m
      (/*AUTOINST*/
       // Outputs
       .bytercvd                         (bytercvd),
-      .rst4                             (rst4),
       .rxst                             (rxst[1:0]),
       .q                                (q[7:0]),
       // Inputs
@@ -108,11 +107,12 @@ module uart_m
       // Outputs
       .loadORtxce                       (loadORtxce),
       .rxce                             (rxce),
+      .rst4                             (rst4),
       // Inputs
       .clk                              (clk),
       .bitx8ce                          (bitx8ce),
-      .rst4                             (rst4),
       .load                             (load),
+      .rxpin                            (rxpin),
       .rxst                             (rxst[1:0]));
    prediv_m #( .SYSCLKFRQ(SYSCLKFRQ), .BITCLKFRQ(BITCLKFRQ),
                .ACCEPTEDERROR_IN_PERCENT(ACCEPTEDERROR_IN_PERCENT))
@@ -404,15 +404,23 @@ endmodule
   
  Also want a freerunning 3-bit counter, but resettable to half-full. 
  We do this with an upcounter. This is the receive clock enable.
- 
- rxstate[0] -- I0                         __              
- rxstate[1] -- I1   ce & (cy | HUNT)  ---|  |-- rxce      
- ce  --------- I2                        >__|             
-        +----- I3
+  
+               __________________           
+ rxstate[0] --| I0 (rxcy & ce) | |        __        
+ rxstate[1] --| I1 (GRCE & rxpin)|-------|  |-- rxce
+ rxpin -------| I2               |       >__|       
+        +-----|_I3_______________|
+        |
+        | rxcy & ce   "(receive count overflow, or rst4) & bitx8ce" 
+      /cy\                                      
+rxst[0](((---- I0  rst4 = rxst == 2'b0
+ ce ---+((--   I1  
+  0 ----(+--   I2  
+rxst[1]-(---   I3
         |                                 
       /cy\                               cnt is an up-counter
- rst4--(((---- I0                         __    
- 0   --+((---- I1   ~rst4&(cnt2^cy)   ---|  |-- cnt2
+ 0    -(((---- I0                         __    
+ rst4 -+((---- I1   ~rst4&(cnt2^cy)   ---|  |-- cnt2
  cnt2 --(+---- I2   | rst4               >__|   
         +----- I3                               
         |                                       
@@ -455,14 +463,18 @@ endmodule
        gnd
   */
 //////////////////////////////////////////////////////////////////////////////
+/*
+ * The dividers as described above. 
+ * In addition rst4, placed here to save a LUT.
+ */
 module rxtxdiv_m
   (
-   input       clk,bitx8ce,rst4,load,
+   input       clk,bitx8ce,load,rxpin,
    input [1:0] rxst,
-   output      loadORtxce,rxce
+   output      loadORtxce,rxce,rst4
    );
    wire [2:0]  c_tnt,tnt,c_cnt,cnt;
-   wire [7:1]  cy;
+   wire [8:1]  cy;
    wire        c_rxce;
    
    SB_LUT4 #(.LUT_INIT(16'hc33c)) 
@@ -490,17 +502,31 @@ module rxtxdiv_m
    i_cnt1(.O(c_cnt[1]),       .I3(cy[5]), .I2(cnt[1]), .I1(1'b0), .I0(rst4));
    SB_CARRY i_cy5(.CO(cy[6]), .CI(cy[5]), .I1(cnt[1]), .I0(1'b0));
    SB_DFF reg5( .Q(cnt[1]), .C(clk), .D(c_cnt[1]));
-   SB_LUT4 #(.LUT_INIT(16'haffa)) 
-   i_cnt2(.O(c_cnt[2]),       .I3(cy[6]), .I2(cnt[2]), .I1(1'b0), .I0(rst4));
-   SB_CARRY i_cy6(.CO(cy[7]), .CI(cy[6]), .I1(cnt[2]), .I0(1'b0));
+   SB_LUT4 #(.LUT_INIT(16'hcffc)) 
+   i_cnt2(.O(c_cnt[2]),       .I3(cy[6]), .I2(cnt[2]), .I1(rst4), .I0(1'b0));
+   SB_CARRY i_cy6(.CO(cy[7]), .CI(cy[6]), .I1(cnt[2]), .I0(rst4));
    SB_DFF reg6( .Q(cnt[2]), .C(clk), .D(c_cnt[2]));
 
-   SB_LUT4 #(.LUT_INIT(16'hf010))
-   i_cnt3(.O(c_rxce), .I3(cy[7]), .I2(bitx8ce),.I1(rxst[1]),.I0(rxst[0]));
+   SB_LUT4 #(.LUT_INIT(16'h0055))
+   i_ff(.O(rst4), .I3(rxst[1]),             .I2(1'b0),.I1(bitx8ce), .I0(rxst[0]));
+   SB_CARRY i_andcy(.CO(cy[8]), .CI(cy[7]), .I1(1'b0),.I0(bitx8ce));
+   SB_LUT4 #(.LUT_INIT(16'hff20))
+   i_rxce( .O(c_rxce), .I3(cy[8]), .I2(rxpin), .I1(rxst[1]), .I0(rxst[0]));
+
+//   assign c_rxce = cy[8] | (rxst == 2'b01 & rxpin);
+
+//   SB_LUT4 #(.LUT_INIT(16'hff0b))
+//   i_cnt3(.O(c_prerxce), .I3(cy[7]), .I2(rxst[1]),.I1(rxst[0]), .I0(rxpin));
+//   SB_LUT4 #(.LUT_INIT(16'h8888))
+//   i_and2(.O(c_rxce), .I3(1'b0), .I2(1'b0),.I1(bitx8ce),.I0(c_prerxce));
    SB_DFF regrxce( .Q(rxce), .C(clk), .D(c_rxce));
 endmodule
 
 /* ==========================================================================
+ 0000 0
+ 0001 0
+ 0010 1
+ 0011 1
  Reception is controlled with a 2-bit state machine. When starting reception,
  the receive shift register is initiated to 0x80, so when the first high is
  shifted out of the register we have counted to 8.
@@ -517,7 +543,7 @@ endmodule
   -----DC BAa---------DC--------------------------
   HUNT 00 1xx         00 001   HUNT   
   HUNT 00 0x0         10 001   HUNT
-  HUNT 00 0x1         10 000   ARMD   Nrst4 actually used
+  HUNT 00 0x1         10 001   ARMD   
   ARMD 10 xx0         10 000   ARMD
   ARMD 10 0x1         11 010   RECV   
   ARMD 10 1x1         00 000   HUNT   False start bit
@@ -525,12 +551,12 @@ endmodule
   RECV 11 x01         11 000   RECV   
   RECV 11 x11         01 000   GRCE   
   GRCE 01 xx0         00 000   GRCE
-  GRCE 01 0x1         00 001   HUNT   Frame bit not right, reject byte
-  GRCE 01 1x1         00 101   HUNT   
+  GRCE 01 0x1         00 000   HUNT   Frame bit not right, reject byte
+  GRCE 01 1x1         00 100   HUNT   
   
  c_NextState[1] =  DCBA == x00x |  DCBA == 11x0
  c_NextState[0] =  DCBA == 100x |  DCBA == 11xx
-   rst4         =  DCBa == 0001
+  (rst4         =  DC   == 00)
    bytercvd     =  DCBA == 011x && rxce
   (initshiftreg =  DCBA == 100x && rxce)
    
@@ -538,6 +564,8 @@ endmodule
  When initshiftreg == 1, load sh[7:0] == 0x80 (qualified with rxce).
  To save one LUT, the initshiftreg equation is propagated to the
  LUTs used to constitute the shift regiser.
+ 
+ The equation for rst4 is moved to rxtxdiv_m in order to save a LUT.
  
  rxst msb    other_bits
  00   hold   hold
@@ -583,7 +611,7 @@ rxst[1] -----(-+-----|I2  |  |  >  |  |      | +-| |0/ |  >_|  |
 module uartrxsm_m
   (
    input        clk,rxce,rxpin,lastbit,
-   output       bytercvd,rst4,
+   output       bytercvd,
    output [1:0] rxst
    ); 
    wire [1:0]   nxt_rxst;
@@ -597,8 +625,10 @@ module uartrxsm_m
 
    SB_LUT4 #(.LUT_INIT(16'h0080))
    bytercvd_i( .O(bytercvd), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
-   SB_LUT4 #(.LUT_INIT(16'h1111))
-   rst4_i( .O(rst4), .I3(1'b0), .I2(1'b0), .I1(rxst[1]), .I0(rxst[0]));
+
+// Moved to rxtxdiv_m to save one LUT   
+//   SB_LUT4 #(.LUT_INIT(16'h1111))
+//   rst4_i( .O(rst4), .I3(1'b0), .I2(1'b0), .I1(rxst[1]), .I0(rxst[0]));
 endmodule
 
 //////////////////////////////////////////////////////////////////////////////
@@ -616,7 +646,7 @@ module uartrx_m
   # (parameter HASRXBYTEREGISTER = 0 )
    (
     input        clk,rxce,rxpin,
-    output       bytercvd,rst4,
+    output       bytercvd,
     output [1:0] rxst,
     output [7:0] q
     );
@@ -626,7 +656,6 @@ module uartrx_m
                    /*AUTOINST*/
                    // Outputs
                    .bytercvd            (bytercvd),
-                   .rst4                (rst4),
                    .rxst                (rxst[1:0]),
                    // Inputs
                    .clk                 (clk),
