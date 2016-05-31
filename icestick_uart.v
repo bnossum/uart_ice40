@@ -76,7 +76,7 @@ module top
    cmb( .O(c_rxpinmeta1), .I3(1'b0), .I2(1'b0), .I1(1'b0), .I0(rxpinmeta1));
    SB_DFF metareg( .Q(rxpin), .C(clk), .D(c_rxpinmeta1));
    
-   uart_m #(.SYSCLKFRQ(12000000), .BITCLKFRQ(9600), 
+   uart_m #(.SYSCLKFRQ(12000000), .BITCLKFRQ(115200), 
             .ACCEPTEDERROR_IN_PERCENT(20), .HASRXBYTEREGISTER(0) )
    uart
      (/*AUTOINST*/
