@@ -1,14 +1,28 @@
 //////////////////////////////////////////////////////////////////////////////
-/* An uart specifically for iCE40, in 32 or 40 logic cells, predivider
- * not included. Typical total size is 50 logicCells or below.  The uart
- * is really minimal, and can't do all the things the Lattice 16550
- * reference design can do.  On the other hand, it is less than 1/10th 
- * of the size.
+/* 
+ * ice_uart40 features
+ * -------------------
+ * o Specifically written for iCE40
+ * o Small footprint
+ *   - 32 logicCells, prescaler excluded
+ *   - Total size, prescaler included, is usually less than 42 
+ *     logicCells
+ *   - Byte receive buffer can be included for convenience, at a 
+ *     cost of 8 additional logicCells
+ *   - Absolute maximum total size is 55 logicCells
+ * o Format is hardcoded: 8 data bits, no parity, one stop bit (8N1)
+ * o Bitrate is hardcoded via parameters
+ * o Simple to interconnect
+ * o Works with any relationship between clock frequency and bitrate,
+ *   as long as the clock rate is at least 16 times the bitrate
+ * o Works for many combinations of clock rate and bit rate even when
+ *   the clock rate is between 8 and 16 times the bitrate
  * 
- * Usage:
+ * Usage
+ * -----
  * o Input rxpin is intended to originate from a physical pin, but can
- *   come from anywhere. This input must have been clocked
- *   through two ff's, to reduce chances of metastability.
+ *   come from anywhere. This input must have been synchronized to the
+ *   clock domain used by the uart.
  * o Output txpin is intended to be connected to a physical pin,
  *   where the output is *inverted*. The output of the uart is
  *   constructed this way to avoid a false transmit at power-on.
@@ -16,45 +30,49 @@
  *   invert it. The reason for this choice is that iCE40 always initiate
  *   ff's to 0 at power-on reset.
  * o When status output txbusy is low, a new byte can be transferred,
- *   use d[7:0] for the data, qualify with input load.
- * o If status output bytercvd is high (NB:one cycle only), a byte 
- *   has been received, and can be read from q[7:0].
+ *   use "d[7:0]" for the data, qualify with "load".  txbusy goes high
+ *   the cycle the transmit shift register is loaded, and goes low at 
+ *   the start of the stop bit.
+ * o If status output bytercvd is high (NB:one cycle only), a byte has
+ *   been received, and can be read from q[7:0]. The bytercvd output
+ *   is intended to be used to set an interrupt flag.
  *   - If data is read from the shift register, it can be latched to
  *     other units qualified by bytercvd. In case a new byte is received
- *     back-to-back, the shift register must be latched before a time of
- *     5/8 bit times has passed, otherwise the shift register contents is
- *     lost. 
- *   - If data is read from the 8-bit holding register, it can be latched
- *     to other units from the clock cycle following bytercvd high. The
- *     holding register must be read before a complete new byte has been
- *     received, available time is a few cycles short of 10 bit times. 
- *   The bytercvd output is intended to be used to set an interrupt flag.
+ *     back-to-back, the shift register must be latched before a period of
+ *     5/8 bit times has passed, otherwise the shift register contents may
+ *     be lost.  
+ *   - If data is read from the optional 8-bit holding register, it
+ *     can be latched to other units from the clock cycle following
+ *     bytercvd high. The holding register must be read before a
+ *     complete new byte has been received, available time is a few
+ *     clock cycles short of 10 bit times.
  * o There is no checks on overrun of the receive buffer.
- * 
- * o Parameters:
- *   - SYSCLKFRQ is the system clock frequency. It must be stated
+ * o There is no check on write collisions of transmit.
+ * o Parameters
+ *   - SYSCLKFRQ is the system clock frequency in Hz. It must be stated
  *     in order to construct a correct bit clock prescaler.
- *   - BITCLKFRQ is the speed of the uart serial operation. It
+ *   - BITCLKFRQ is the speed of the uart serial operation in Hz. It
  *     must be stated in order to construct the prescaler.
  *   - HASRXBYTEREGISTER is a switch. When true, the received
  *     byte is written to a 8-bit holding register, and can be
  *     read at relative leasure, while the receiver shift register
  *     is busy receiving the next byte. If HASRXBYTEREGISTER is false 
  *     the received byte is read directly from the shift register.
- *     In that case 8 logic cells are saved, but the byte must be
- *     read in less than 5/8 bit transfer time. It is recommended to
- *     set HASRXBYTEREGISTER == 1.
- *   - ACCEPTEDERROR_IN_PERCENT determine if it is possible to reach
- *     a required quality on the actual bitrate compared to the
- *     desired bitrate. In itself, this solution samples the receive
- *     line 8 times in a bit period. Hence, inherently, there is a 12.5%
- *     uncertainty in the determination on where a startbit really starts.
- *     Because a prescaler will normaly not be perfect, the sampling time
- *     of each bit is either leading or lagging, and the error accumulates
- *     over the startbit, the data bits, and the frame bit. This parameter
- *     sets a limit to how far the error is allowed to drift.
- */
- 
+ *     In that case 8 logic cells are saved, but the received byte must
+ *     be read in less than 5/8 bit transfer time. Default value for
+ *     HASRXBYTEREGISTER is 1.
+ *   - ACCEPTEDERROR_IN_PERCENT determine if it is possible to reach a
+ *     required quality on the actual bitrate compared to the desired
+ *     bitrate. In itself, this solution samples the receive line 8
+ *     times in a bit period. Hence, inherently, there is a 12.5%
+ *     uncertainty in the determination on where a startbit really
+ *     starts.  This uncertainty comes in addition to the error traced
+ *     by this parameter. Because a prescaler will normaly not be
+ *     perfect, the sampling time of each bit is either leading or
+ *     lagging, and the error accumulates over the startbit, the data
+ *     bits, and the frame bit. This parameter sets a limit to how far
+ *     the error is allowed to drift.
+ */ 
 module uart_m
   # (parameter HASRXBYTEREGISTER = 1, // 0 : q from serial receivebuffer
      //                                  1 : q from byte buffer 
@@ -73,7 +91,7 @@ module uart_m
         output       bytercvd, // Status receive. True 1 bit period cycle only
         output [7:0] q //         Received byte from serial receive/byte buffer
         );
-   localparam integer PREDIVIDE_m1 = ((2*SYSCLKFRQ+1) / (BITCLKFRQ*8*2)) - 1;
+   localparam integer PREDIVIDE_m1 = (SYSCLKFRQ+4*BITCLKFRQ)/(8*BITCLKFRQ) - 1;
    /*AUTOWIRE*/
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
    wire                 loadORtxce;             // From rxtxdiv_i of rxtxdiv_m.v
@@ -124,7 +142,8 @@ module uart_m
       .bitx8ce                          (bitx8ce),
       .prediv_m_dummy                   (prediv_m_dummy),
       // Inputs
-      .clk                              (clk));
+      .clk                              (clk),
+      .cte1                             (cte1));
 endmodule
    
 //////////////////////////////////////////////////////////////////////////////
@@ -140,32 +159,292 @@ endmodule
  * 
  * As long as an acceptable solution in terms of accuracy can be
  * constructed with the above, this is the smallest implementation I
- * can make. When the bitrate is closer to the clockrate, better
- * approaches exists. These are not explored.
- * 
+ * can think of. When the bitrate is closer than 16 times the
+ * clockrate, better approaches exists. These are not explored.    
  * The module need to know the system clock frequency, and also the
  * target bitrate. A parameter is also present to control the accuracy
  * of the solution. Assume we generate a bit clock that is 2% off
  * target when a bit is transmitted. The error accumulates over the
  * startbit, the 8 data bits, and the stop bit. Hence the accumulated
  * error will be 10*2 = 20 % of a bit period. This is usually
- * acceptable. In theory one could accept up to a 99% error over a 10
- * bit period, but that won't work. It is recommended to keep this
- * parameter below 30, it is probably no use to decrease it below 6.
- * 
- */
+ * acceptable. It is recommended to keep this parameter below 30, 
+ * it is probably no use to decrease it below 6.
 
+ Special case:
+ If the clock is exactly 8 times the bitrate,
+ this module is not needed. bitx8ceis then set to the constant 1.
+ 
+ Special case:
+ If the clock is exactly 16 times the bitrate, bitx8ce can be
+ the output of a toggle register.
+
+ The easiest case for this module is when we want to count PREDIVIDE
+ times. Let us examine the module generated when we have a 12 MHz
+ clock, and want a 115200 bps uart. The prescale value is then
+ 13. Counting sequence will be:
+ 4 5 6 7 8 9 10 11 12 13 14 15 0 4 5 6 7 8 9 10 11 12 13 14 15 0
+              ____     _
+   0  -------| I0 |---| |----+-  r_tc <= !r_tc & cy[4];
+   0  -------| I1 |   >_|    |           
+     +-------| I2 |          |
+     |   +---|_I3_|          |
+     +---(-------------------+
+       /cy\         
+        |||   ____     _
+   0  --(((--| I0 |---| |----+-  r_cnt[3] <= (cy[3]^r_cnt[3])&!r_tc;
+r_tc  --+((--| I1 |   >_|    |               
+     +---(+--| I2 |          |
+     |   +---|_I3_|          |
+     +---(-------------------+
+       /cy\         
+        |||   ____     _
+   0  --(((--| I0 |---| |----+-  r_cnt[2] <= (cy[2]^r_cnt[2])&!r_tc | r_tc;
+r_tc  --+((--| I1 |   >_|    |               
+     +---(+--| I2 |          |
+     |   +---|_I3_|          |
+     +---(-------------------+
+       /cy\         
+        |||   ____     _
+   0  --(((--| I0 |---| |----+-  r_cnt[1] <= (cy[1]^r_cnt[1])&!r_tc;
+r_tc  --+((--| I1 |   >_|    |               
+     +---(+--| I2 |          |
+     |   +---|_I3_|          |
+     +---(-------------------+
+       /cy\         
+        |||   ____     _
+   0  --(((--| I0 |---| |----+-  r_cnt[0] <= (cy[0]^r_cnt[0])&!r_tc;
+r_tc  --+((--| I1 |   >_|    |               
+     +---(+--| I2 |          |
+     |   +---|_I3_|          |
+     +---(-------------------+
+       /cy\         
+         |
+        vcc
+ 
+ In the specific case where PREDIVIDE_m1 is a power of 2, we save one logicCell.
+ If, for instance, PREDIVIDE is 5, we use the circuit below, and the counting
+ sequence is: 0 0 1 2 3 0 0 1 2 3
+ 
+              ____     _
+   0  -------| I0 |---| |----+-  r_tc <= !r_tc & cy[4];
+   0  -------| I1 |   >_|    |           
+     +-------| I2 |          |
+     |   +---|_I3_|          |
+     +---(-------------------+
+       /cy\         
+        |||   ____     _
+   0  --(((--| I0 |---| |----+-  r_cnt[1] <= (cy[1]^r_cnt[1])&!r_tc;
+r_tc  --+((--| I1 |   >_|    |               
+     +---(+--| I2 |          |
+     |   +---|_I3_|          |
+     +---(-------------------+
+       /cy\         
+        |||   ____     _
+   0  --(((--| I0 |---| |----+-  r_cnt[0] <= (cy[0]^r_cnt[0])&!r_tc;
+r_tc  --+((--| I1 |   >_|    |               | r_tc
+     +---(+--| I2 |          |
+     |   +---|_I3_|          |
+     +---(-------------------+
+       /cy\         
+         |
+        vcc
+ 
+ Perturbation
+ ------------ 
+
+  Assume the following: A 16 MHz clock, and we want 115200 bps.  At
+ first hand this seems simple, 16000000/115200=138.8 approx 139 clock
+ cycles per bit time. But we need a x8 clock, and
+ 16000000/(115200*8)=17.36.  The closest we come directly is 17 as a
+ predivider, but 16000000/(17*8)=117647, too far from 115200. This is
+ disappointing - should it not be possible to transmit at 115200 when
+ we have a clock that is 139 times faster? If we could count to 17.5,
+ we would acheive a bitrate of 16000000/(17.5*8)=114286,
+ acceptable. It is not difficult to count to 17.5, we alternately
+ count to 17 and 18.
+ 
+ Example 2: A 4 MHz clock, and we want 115200. Ideal prescaler is
+ 4000000/(8*115200)=4.34, if we count to 4 five times, and to 5 three
+ times, we count on average (8*4+3)/8 = 4.375, and can realize a
+ bitrate of 4000000/(4.375*8)=114.284 for an error of 7.9% over a
+ frame
+ 
+ Example 3: A 1 MHz clock, and we want 115200.
+ 1000000/(1.0625*8)=117647 for an error of 21.2% over a frame, high
+ error, but this will probably work.  Here we want to divide by 1
+ fifteen times, and by 2 one time: (16*1+1*1)/16 = 1.0625
+ 
+ Assume we have a clock >= 8*bitrate. This is a prerequisite for this
+ uart anyway. When we can perturb with a granularity of 4 bits, it
+ follows that the maximum error we can have per averaged bit period is
+ (1/32)=0.03125 bit cycle. Over 10 bits this accumulates to an error
+ of 31% This is high, but may work in many situations.
+ 
+ Assume we have a clock >= 16*bitrate. The error will be halved, and
+ will maximum be 16% over a frame. Acceptable. Hence, as long as the
+ clock is above 16 times the bitrate, this uart will work. Because we
+ only sample 8 times in a bit period, the required eye-opening is
+ 12.5+17, around 0.3 UI.
+ 
+ The perturbator could come in many forms
+ Sequence         average  LogicCells Comment
+ 0                0        0          No perturbator           Perturbator
+ 0+1              1/2      1          ToggleFF                 FF itself
+ 0+0+1            1/3      2          2-bit cnt, seq: 0,1,2    msb counter
+ 0+1+1            2/3      2          2-bit cnt, seq: 1,2,3    msb counter
+ 0+0+0+1          1/4      3          2-bit cnt, 0,1,2,3       cnt==3
+ 0+1+1+1          3/4      3          2-bit cnt, 0,1,2,3       cnt!=0
+ 0+0+0+0+1        1/5      3          2-bit cnt, 0,1,2,3,0     cy registered
+ 0+1+1+1+1        4/5      3          2-bit cnt, 0,1,2,3,0     ~cy registered
+ 0+0+0+0+0+1      1/6      4          3-bit cnt, 3,4,5,6,7,0   cy registered
+ 1+1+1+1+1+0      5/6      4          3-bit cnt, 3,4,5,6,7,0   ~cy registered
+ 0+0+0+0+0+0+1    1/7      4          3-bit cnt, 2,3,4,5,6,7,0 cy registered
+ 0+0+0+1+0+0+1    2/7      4
+ 0+1+0+1+0+0+1    3/7      4
+ 1+0+1+0+1+1+0    4/7      4
+ 1+1+1+0+1+1+0    5/7      4
+ 1+1+1+1+1+1+0    6/7      4
+ 0+0+0+0+0+0+0+1  1/8      4          3-bit cnt              cnt==111
+ 0+0+1+0+0+1+0+1  3/8      4          3-bit cnt              cnt==010,101,111
+ 1+1+0+1+1+0+1+0  5/8      4          3-bit cnt              cnt!=010,101,111
+ 1+1+1+1+1+1+1+0  7/8      4          3-bit cnt              cnt!=111
+ ... many more with periods:
+      9 : 1/9,2/9,4/9,5/9,7/9,8/9                                         5
+     10 : 1/10, 3/10, 7/10, 9/10                                          5
+     11 : 1/11, 2/11, 3/11, 4/11, 5/11, 6/11, 7/11, 8/11, 9/11, 10/11     5
+     12 : 1/12, 5/12, 7/12, 11/12                                         5
+     13 : 1/13,2/13,3/13,4/13,5/13,6/13,7/13,8/13,9/13,10/13,11/13,12/13  5
+     14 : 1/14, 3/14, 5/14, 9/14, 11/14, 13/14                            5
+     15 : 1/15, 2/15, 4/15, 6/15, 7/15, 8/15, 9/15, 11/15, 13/15, 14/15   5
+ 0+0+0+0+0+0+0+0+0+0+0+0+0+0+0+1         1/16     5
+ 0+0+0+0+1+0+0+0+0+1+0+0+0+0+1+0         3/16     5 
+ 0+0+1+0+0+1+0+0+1+0+0+1+0+0+1+0         5/16     5 
+ 0+1+0+1+0+1+0+1+0+1+0+1+0+1+0+0         7/16     5 
+ 1+0+1+0+1+0+1+0+1+0+1+0+1+0+1+1         9/16     5 
+ 1+1+0+1+1+0+1+1+0+1+1+0+1+1+0+1        11/16     5 
+ 1+1+1+1+0+1+1+1+1+0+1+1+1+1+0+1        13/16     5 
+ 1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+0        15/16     5 
+
+ Life is to short to explore all of these. I concentrate on the
+ following because the construction is regular. The perturbator
+ require from 0 to 5 logicCells. Though size matters, an observation
+ to make is that if several bits of perturbation is needed, the
+ counter itself is correspondingly shorter.
+  
+                                              LogicCells
+ Average     Sequence                         |  Comment_____________________
+ 0.000 0     0                                0  No perturbator  
+ 0.063 1/16  0+0+0+0+0+0+0+0+0+0+0+0+0+0+0+1  5  4-bit cnt cnt==1111
+ 0.125 1/8   0+0+0+0+0+0+0+1                  4  3-bit cnt cnt==111
+ 0.188 3/16  0+0+0+0+1+0+0+0+0+1+0+0+0+0+1+0  5  4-bit cnt cnt==0100,1001,1110
+ 0.250 1/4   0+0+0+1                          3  2-bit cnt cnt==3
+ 0.313 5/16  0+0+1+0+0+1+0+0+1+0+0+1+0+0+1+0  5  4-bit cnt cnt==...
+ 0.375 3/8   0+0+1+0+0+1+0+1                  4  3-bit cnt cnt==010,101,111
+ 0.438 7/16  0+1+0+1+0+1+0+1+0+0+1+0+1+0+1+0  5  4-bit cnt cnt==...
+ 0.500 1/2   0+1                              1  1-bit cnt cnt==1
+ 0.563 9/16  1+0+1+0+1+0+1+0+1+1+0+1+0+1+0+1  5  4-bit cnt cnt==...
+ 0.625 5/8   1+1+0+1+1+0+1+0                  4  3-bit cnt cnt!=010,101,111
+ 0.688 11/16 1+1+0+1+1+0+1+1+0+1+1+0+1+1+0+1  5  4-bit cnt cnt==...
+ 0.750 3/4   0+1+1+1                          3  2-bit cnt cnt!=0
+ 0.813 13/16 1+1+1+1+0+1+1+1+1+0+1+1+1+1+0+1  5  4-bit cnt cnt==...
+ 0.875 7/8   1+1+1+1+1+1+1+0                  4  3-bit cnt cnt!=111
+ 0.938 15/16 1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+0  5  4-bit cnt cnt==...
+    
+ The counter is always incremented with bitx8ce as clock enable. They
+ are arranged as binary counters, but I do not use carry. We have the
+ following variants:
+
+ bitx8ce ----------+
+       _________   |  ___
+ +----| I0 |>o- |--)-|   |---+-- perturb_out
+ |    |_________|  + |CE |   |
+ |                   >___|   |
+ +---------------------------+
+ 
+ bitx8ce ----------+
+       _________   |  ___
+ +----|I0       |--)-|   |------ perturb_out
+ | +--|I1       |  +-|CE |   
+ | |  |_________|  | >___|   
+ | |               |        
+ | |   _________   |  ___
+ +-(--|I0       |--)-|   |---+-- p1
+ | +--|I1       |  +-|CE |   |
+ | |  |_________|  | >___|   |
+ | |               |         |
+ | +---------------)---------+
+ |     _________   |  ___
+ +----| I0 |>o- |--)-|   |---+-- p0
+ |    |_________|  +-|CE |   |
+ |                   >___|   |
+ +---------------------------+
+
+ bitx8ce ------------+
+         _________   |  ___
+ +------|I0       |--)-|   |------ perturb_out
+ | +----|I1       |  +-|CE |   
+ | | +--|I2_______|  | >___|   
+ | | |               |        
+ | | |   _________   |  ___
+ +-(-(--|I0       |--)-|   |---+-- p2
+ | +-(--|I1       |  +-|CE |   |
+ | | +--|I2_______|  | >___|   |
+ | | |               |         |
+ | | +---------------)---------+
+ | |     _________   |  ___
+ +-(----|I0       |--)-|   |---+-- p1
+ | +----|I1       |  +-|CE |   |
+ | |    |_________|  | >___|   |
+ | |                 |         |
+ | +-----------------)---------+
+ |       _________   |  ___
+ +------| I0 |>o- |--)-|   |---+-- p0
+ |      |_________|  +-|CE |   |
+ |                     >___|   |
+ +-----------------------------+
+
+ bitx8ce -0-----------+
+          _________   |  ___
+ +-------|I0       |--)-|   |------ perturb_out
+ | +-----|I1       |  +-|CE |   
+ | | +---|I2       |  | >___|   
+ | | | +-|I3_______|  |        
+ | | | |  _________   |  ___
+ +-(-(-(-|I0       |--)-|   |---+-- p3
+ | +-(-(-|I1       |  +-|CE |   |
+ | | +-(-|I2       |  | >___|   |
+ | | | +-|I3_______|  |         |
+ | | | +--------------)---------+
+ | | |    _________   |  ___
+ +-(-(---|I0       |--)-|   |---+-- p2
+ | +-(---|I1       |  +-|CE |   |
+ | | +---|I2_______|  | >___|   |
+ | | |                |         |
+ | | +----------------)---------+
+ | |      _________   |  ___
+ +-(-----|I0       |--)-|   |---+-- p1
+ | +-----|I1       |  +-|CE |   |
+ | |     |_________|  | >___|   |
+ | |                  |         |
+ | +------------------)---------+
+ |        _________   |  ___
+ +-------| I0 |>o- |--)-|   |---+-- p0
+ |       |_________|  +-|CE |   |
+ |                      >___|   |
+ +------------------------------+
+
+ */
 module prediv_m
   #( parameter SYSCLKFRQ = 12000000, /* System Clock Frequency in Hz */
      BITCLKFRQ = 115200, /*             Bit Clock Frequency in Hz    */
      ACCEPTEDERROR_IN_PERCENT = 20  /*  How accurate must we be?     */
      ) (
-        input       clk, 
-        output      bitx8ce,prediv_m_dummy
+        input         clk, cte1,
+        output        bitx8ce,prediv_m_dummy
         );
    localparam real    F_IDEALPREDIVIDE = SYSCLKFRQ / (BITCLKFRQ*8.0);
    // Rules of rounding in Verilog seems to be truncate
-   localparam integer PREDIVIDE = (SYSCLKFRQ+4) / (BITCLKFRQ*8); 
+   localparam integer PREDIVIDE = (SYSCLKFRQ+4*BITCLKFRQ) / (8*BITCLKFRQ); 
    localparam real    RESULTING_BITFRQ = SYSCLKFRQ / (PREDIVIDE*8.0);
    localparam real    REL_ERR = RESULTING_BITFRQ > BITCLKFRQ ?
                       (RESULTING_BITFRQ - BITCLKFRQ)/BITCLKFRQ :
@@ -173,6 +452,10 @@ module prediv_m
    localparam real    REL_ERR_OVER_FRAME_IN_PERCENT = REL_ERR * 10 * 100;
    localparam integer PREDIVIDE_m1 = PREDIVIDE - 1; 
    localparam integer PRED_initval = (~PREDIVIDE_m1)+1;
+   genvar             j;
+   wire [15:0]        cy,c_cnt,r_cnt;
+   wire               c_tc,r_tc;
+
    
    /* A worked example. Assume SYSCLKFRQ = 4000000 Hz, BITCLKFRQ = 9600
     *
@@ -185,13 +468,10 @@ module prediv_m
     * I arrange for the predivider to be a counter that uses the carry
     * chain. The final carry out is registered, and this is the result
     * of the prescaler. The predivider is an up-counter.
-    * 
-    * Work. During simulation, pay attention to corner-cases. Loading of 0
-    * count length multiple of (1<<x), etc.
     */
-
    assign prediv_m_dummy = clk; // Vanity: Avoid a warning when PREDIVIDE_m == 0
    generate
+
       if ( (REL_ERR_OVER_FRAME_IN_PERCENT > ACCEPTEDERROR_IN_PERCENT)
            || (PREDIVIDE_m1 < 0)
            || (PREDIVIDE_m1 > 16'hffff) ) begin : blk0
@@ -199,21 +479,25 @@ module prediv_m
       end
 
       if ( PREDIVIDE_m1 == 0 ) begin
-         assign bitx8ce = 1'b1; // No prescaler needed. 
-      end else begin
-         wire [15:0]        cy,c_cnt,r_cnt;
-         wire               c_tc,r_tc;
-         genvar             j;
-         
-         assign cy[0] = 1'b1;
+         // No prescaler needed. 
+         assign bitx8ce = cte1;
+      end else if ( PREDIVIDE_m1 == 1 ) begin
+         // Special case, prescale by 2
+         SB_LUT4 #(.LUT_INIT(16'h5555)) 
+         cmb_tc( .O(c_tc), .I3(1'b0), .I2(1'b0), .I1(1'b0), .I0(r_tc));
+         SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
+         assign bitx8ce = r_tc;         
+      end else if ( (PREDIVIDE_m1 & (PREDIVIDE_m1-1)) != 0 ) begin
+         // General case, PREDIVIDE_m1 is not a power of 2.
+         assign cy[0] = cte1;
          for ( j = 0; PREDIVIDE_m1 >> j; j = j + 1 ) begin
             localparam b = (PRED_initval >> j);
-            localparam v = 16'h4114 + ((b&1)? 16'haaaa : 0);
+            localparam v = 16'h0330 + ((b&1)? 16'hcccc : 0);
             
             SB_LUT4  #(.LUT_INIT(v))
-            i_cnt( .O(c_cnt[j]), 
-                   .I3(cy[j]), .I2(r_cnt[j]), .I1(1'b0), .I0(bitx8ce));
-            SB_CARRY carry( .CO(cy[j+1]),.CI(cy[j]),.I1(r_cnt[j]), .I0(1'b0));
+            i_cnt( .O(c_cnt[j]), .I0(1'b0),
+                                         .I3(cy[j]),.I2(r_cnt[j]), .I1(r_tc));
+            SB_CARRY carry( .CO(cy[j+1]),.CI(cy[j]),.I1(r_cnt[j]), .I0(r_tc));
             SB_DFF cnt_inst( .Q(r_cnt[j]), .C(clk), .D(c_cnt[j]) );
 
             if ( (PREDIVIDE_m1 >> (j+1)) == 0 ) begin
@@ -222,7 +506,24 @@ module prediv_m
                SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
             end
          end
-         assign bitx8ce = r_tc;
+         assign bitx8ce = r_tc;         
+      end else begin
+         // When PREDIVIDE_m1 is a power of 2. This code could be merged
+         // with the general case, this is not done for a semblance of clarity.
+         assign cy[0] = cte1;
+         for ( j = 0; PREDIVIDE_m1 >> (j+1); j = j + 1 ) begin
+            SB_LUT4 #(.LUT_INIT(16'h0330))
+            i_cnt( .O(c_cnt[j]), .I0(1'b0),
+                                         .I3(cy[j]),.I2(r_cnt[j]), .I1(r_tc));
+            SB_CARRY carry( .CO(cy[j+1]),.CI(cy[j]),.I1(r_cnt[j]), .I0(r_tc));
+            SB_DFF cnt_inst( .Q(r_cnt[j]), .C(clk), .D(c_cnt[j]) );
+            if ( (PREDIVIDE_m1 >> (j+2)) == 0 ) begin
+               SB_LUT4 #(.LUT_INIT(16'h0f00)) 
+               cmb_tc( .O(c_tc), .I3(cy[j+1]),.I2(r_tc), .I1(1'b0),  .I0(1'b0));
+               SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
+            end
+         end
+         assign bitx8ce = r_tc;         
       end
    endgenerate
 endmodule
@@ -238,7 +539,8 @@ module AssertModule
    assign AssertKluge = AssertFailed;
 endmodule
 
-/* //////////////////////////////////////////////////////////////////////////////
+/* 
+ //////////////////////////////////////////////////////////////////////////////
  The transmit part in 12 LogicCells.
  txpin is to be connected to a pad with INVERTED output. This way uart
  transmit will go to inactive during power-up.
@@ -250,9 +552,15 @@ endmodule
  We also need a FF to synchronize "load" with "txce". We could skip
  this, it would imply a 1/8 bit period uncertainty in the length of
  the start bit. Even if this uart is very spartan, I do not want to
- degrade the performance, so this FF stays.
+ degrade the accuracy, so this FF stays.
  
- We also need a FF to record that the shift regiser is busy.
+ We also need a FF to record that the shift regiser is busy. The shift
+ register is busy from the clock cycle after it is loaded, until start
+ of transmit of the stop bit. For continuous transfer, a
+ microcontroller is expected to hook up ~txbusy as an interrupt
+ source. A new byte must then be output in 7/8 bit times. An example:
+ At 12 MHz clock, 115200 bps, a new byte must be written in at most 91
+ clock cycles to saturate the transmit path.
   
 loadORtxce -------------------+
 load                _____     |
@@ -410,8 +718,8 @@ endmodule
  We do this with an upcounter. This is the receive clock enable.
  
                PREDIVIDE_m1 != 0 |                PREDIVIDE_m1 == 0:
-               (rxcy & ce) |     |                ((ARMD | RECV) & ce) |
-               (GRCE & rxpin)    |                (GRCE & rxpin)       |
+               (rxcy & ce) |     |                ((ARMD | RECV) & rxcy & ce) |
+               (GRCE & rxpin)    |                (GRCE & rxpin)              |
                                  |                (HUNT & rxpin)
                ____              |                ____             
  rxstate[0] --| I0 |  __         |  rxstate[0] --| I0 |  __        
@@ -517,10 +825,11 @@ module rxtxdiv_m
    SB_DFF reg6( .Q(cnt[2]), .C(clk), .D(c_cnt[2]));
 
    SB_LUT4 #(.LUT_INIT(16'h0055))
-   i_rst(.O(rst4), .I3(rxst[1]),             .I2(1'b0),.I1(bitx8ce), .I0(rxst[0]));
-   SB_CARRY i_andcy(.CO(cy[8]), .CI(cy[7]), .I1(1'b0),.I0(bitx8ce));
+   i_rst(.O(rst4), .I3(rxst[1]),          .I2(1'b0),.I1(bitx8ce), .I0(rxst[0]));
+   SB_CARRY i_andcy(.CO(cy[8]),.CI(cy[7]),.I1(1'b0),.I0(bitx8ce));
    generate 
-      localparam v = PREDIVIDE_m1 == 0 ? 16'hfc30 : 16'hff20;
+//      localparam v = PREDIVIDE_m1 == 0 ? 16'hfc30 : 16'hff20;
+      localparam v = 16'hfc30; // Seems I do not need two cases.
       SB_LUT4 #(.LUT_INIT(v))
       i_rxce( .O(c_rxce), .I3(cy[8]), .I2(rxpin), .I1(rxst[1]), .I0(rxst[0]));
    endgenerate
@@ -528,10 +837,6 @@ module rxtxdiv_m
 endmodule
 
 /* ==========================================================================
- 0000 0
- 0001 0
- 0010 1
- 0011 1
  Reception is controlled with a 2-bit state machine. When starting reception,
  the receive shift register is initiated to 0x80, so when the first high is
  shifted out of the register we have counted to 8.
@@ -565,12 +870,11 @@ endmodule
    bytercvd     =  DCBA == 011x && rxce
   (initshiftreg =  DCBA == 100x && rxce)
    
- Shift shift register right in state RECV, qualified with rxce
- When initshiftreg == 1, load sh[7:0] == 0x80 (qualified with rxce).
- To save one LUT, the initshiftreg equation is propagated to the
- LUTs used to constitute the shift regiser.
- 
- The equation for rst4 is moved to rxtxdiv_m in order to save a LUT.
+ Shift shift register right in state RECV, qualified with rxce. When
+ initshiftreg == 1, load sh[7:0] == 0x80 (qualified with rxce). To
+ save one LUT, the initshiftreg equation is propagated to the LUTs
+ used to constitute the shift regiser. The equation for rst4 is moved
+ to rxtxdiv_m in order to save a LUT.
  
  rxst msb    other_bits
  00   hold   hold
@@ -631,9 +935,6 @@ module uartrxsm_m
    SB_LUT4 #(.LUT_INIT(16'h0080))
    bytercvd_i( .O(bytercvd), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
 
-// Moved to rxtxdiv_m to save one LUT   
-//   SB_LUT4 #(.LUT_INIT(16'h1111))
-//   rst4_i( .O(rst4), .I3(1'b0), .I2(1'b0), .I1(rxst[1]), .I0(rxst[0]));
 endmodule
 
 //////////////////////////////////////////////////////////////////////////////
@@ -697,12 +998,6 @@ module uartrx_m
 endmodule
 
 /* 
- Resource usage FF
- ---------------------
- Nr Type ClockEnable     Logic construction 
- 12 DFFE (loadORtxce)    uarttx   12
- 16 DFFE (rxce)          uartrxsm  2 / uartrx 8+6
-  9 DFF                  rxtxdiv   7 / uartrx 2
 
  Examples
  -------- 

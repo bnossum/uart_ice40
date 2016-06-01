@@ -11,7 +11,7 @@
  */
 
 module tst;
-   reg [15:0] cyclecounter,simtocy,tx_cyclecounter;
+   reg [31:0] cyclecounter,simtocy,tx_cyclecounter;
    reg        load,bytercvd_dly1;
    wire       cte1,rxpin;
    reg [7:0]  d;
@@ -20,7 +20,20 @@ module tst;
    reg        base_clk;
    reg        rx_clk;
    reg        tx_clk;
-   
+   localparam MEGA = 1000000;
+   localparam SYSCLKFRQ = 12*MEGA; 
+   localparam BITCLKFRQ = 115200;
+
+   localparam SIMTOCY = 5 * 10* SYSCLKFRQ/(BITCLKFRQ);
+   localparam ACCEPTEDERROR_IN_PERCENT = 20;
+   localparam real    F_IDEALPREDIVIDE = SYSCLKFRQ / (BITCLKFRQ*8.0);
+   localparam integer PREDIVIDE = (SYSCLKFRQ+BITCLKFRQ*4) / (BITCLKFRQ*8); 
+   localparam real    RESULTING_BITFRQ = SYSCLKFRQ / (PREDIVIDE*8.0);
+   localparam real    REL_ERR = RESULTING_BITFRQ > BITCLKFRQ ?
+                      (RESULTING_BITFRQ - BITCLKFRQ)/BITCLKFRQ :
+                      (BITCLKFRQ - RESULTING_BITFRQ)/BITCLKFRQ;
+   localparam real    REL_ERR_OVER_FRAME_IN_PERCENT = REL_ERR * 10 * 100;
+
    /*AUTOWIRE*/
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
    wire                 bytercvd;               // From dut_rx of uart_m.v
@@ -35,9 +48,16 @@ module tst;
    
 
    initial begin
+      $display( "Predivide value %d (ideal %f)", PREDIVIDE, F_IDEALPREDIVIDE );
+      $display( "Resulting bitrate : %d", RESULTING_BITFRQ );
+      $display( "Error over (startbit,byte,stopbit) in %% of bit period: %f", 1000*REL_ERR );
+      if ( REL_ERR_OVER_FRAME_IN_PERCENT > ACCEPTEDERROR_IN_PERCENT ) begin
+         $display( "Can not realize this usart, aborts" );
+         $finish;
+      end
       $dumpfile("tst.lxt");
       $dumpvars(0,tst);
-      simtocy = 6000;
+      simtocy = SIMTOCY;
       tx_clk <= 0;
       rx_clk <= 0;
       base_clk <= 0;
@@ -50,23 +70,24 @@ module tst;
 
    always @(posedge base_clk ) begin
       cyclecounter <= cyclecounter+1;
-      if ( cyclecounter > simtocy ) begin
-         if ( simtocy == 6000 )
+      if ( cyclecounter > SIMTOCY ) begin
+         if ( simtocy == SIMTOCY )
            $display( "Simulation went off the rails" );
          $finish;
       end
       tx_clk <= ~tx_clk;
-      if ( cyclecounter > 107 )
+      if ( cyclecounter > 0.8*SYSCLKFRQ/(BITCLKFRQ) )
         rx_clk <= ~rx_clk;
    end
    
    always @(posedge tx_clk) begin
       tx_cyclecounter <= tx_cyclecounter + 1;
-      load <= ( tx_cyclecounter == 654 || tx_cyclecounter == 2222 )
+      load <= ( tx_cyclecounter == 10 +       SYSCLKFRQ/BITCLKFRQ || 
+                tx_cyclecounter == 10 + 12*(SYSCLKFRQ/BITCLKFRQ) )
         ? 1'b1 : 1'b0;
-      if ( tx_cyclecounter == 560 ) begin
+      if ( tx_cyclecounter == SYSCLKFRQ/BITCLKFRQ ) begin
          d <= char1;
-      end else if ( tx_cyclecounter == 800 ) begin
+      end else if ( tx_cyclecounter == SYSCLKFRQ/BITCLKFRQ + 20 ) begin
          d <= char2;
       end
    end
@@ -77,7 +98,7 @@ module tst;
          if ( seenB ) begin
             if ( q != char2 ) begin
                $display( "Something wrong2" );
-               $finish;
+               simtocy <= cyclecounter+400;
             end else begin              
                $display( "Success" );
                simtocy <= cyclecounter+400;
@@ -85,7 +106,7 @@ module tst;
          end else begin
             if ( q != char1 ) begin
                $display( "Something is wrong" );
-               $finish;
+               simtocy <= cyclecounter+400;
             end else begin
                //$display("HERE");
                seenB <= 1;
@@ -103,8 +124,7 @@ module tst;
    // phases of the clocks.
    assign dummy_rxpin = 0;
    uart_m
-     #( .SYSCLKFRQ(128), .BITCLKFRQ(4), .HASRXBYTEREGISTER(1'b1))
-   //     #( .SYSCLKFRQ(12000000), .BITCLKFRQ(115200), .HASRXBYTEREGISTER(1'b1))
+     #( .SYSCLKFRQ(SYSCLKFRQ), .BITCLKFRQ(BITCLKFRQ), .HASRXBYTEREGISTER(1'b1))
    dut_tx
      (// Outputs
       .bytercvd(dummy_bytercvd),
@@ -123,8 +143,7 @@ module tst;
       .d                                (d[7:0]));
    
    uart_m
-     #( .SYSCLKFRQ(128), .BITCLKFRQ(4), .HASRXBYTEREGISTER(1'b1))
-   //     #( .SYSCLKFRQ(12000000), .BITCLKFRQ(115200), .HASRXBYTEREGISTER(1'b1))
+     #( .SYSCLKFRQ(SYSCLKFRQ), .BITCLKFRQ(BITCLKFRQ), .HASRXBYTEREGISTER(1'b1))
    dut_rx
      (// Outputs
       .txpin(    dummy_txpin    ),

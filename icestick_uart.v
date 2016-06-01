@@ -78,7 +78,7 @@ module top
    
 //   uart_m #(.SYSCLKFRQ(12000000), .BITCLKFRQ(115200), 
 //            .ACCEPTEDERROR_IN_PERCENT(20), .HASRXBYTEREGISTER(0) )
-   uart_m #(.SYSCLKFRQ(196), .BITCLKFRQ(1), 
+   uart_m #(.SYSCLKFRQ(8*2), .BITCLKFRQ(1), 
             .ACCEPTEDERROR_IN_PERCENT(20), .HASRXBYTEREGISTER(0) )
    uart
      (/*AUTOINST*/
