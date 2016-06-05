@@ -60,7 +60,7 @@
  *     the received byte is read directly from the shift register.
  *     In that case 8 logic cells are saved, but the received byte must
  *     be read in less than 5/8 bit transfer time. Default value for
- *     HASRXBYTEREGISTER is 1.
+ *     HASRXBYTEREGISTER is 0.
  *   - ACCEPTEDERROR_IN_PERCENT determine if it is possible to reach a
  *     required quality on the actual bitrate compared to the desired
  *     bitrate. In itself, this solution samples the receive line 8
@@ -72,9 +72,23 @@
  *     lagging, and the error accumulates over the startbit, the data
  *     bits, and the frame bit. This parameter sets a limit to how far
  *     the error is allowed to drift.
+ * o Tolerances
+ *   - This uart use a 8 times oversampling. Inherent to that decission
+ *     is a .125 UI uncertainty in deciding where a startbit starts
+ *   - Worst case error due to the divisor solutions occurs when
+ *     the clock frequency cfrq = 8.03125 bitfrq. To give a real 
+ *     example, assume transmission happens at 115200, and the clock 
+ *     frequency is 925200 Hz. We do a fractional divide of 8.0625,
+ *     and acheives a bitrate of 114753 bps. The error in % for a 1-bit
+ *     period is 0.39%, hence error over 10 bits is 3.9%, or 0.04 UI
+ *     This is little compared with the uncertainty of the 8-times
+ *     sampling, hence I assume the uart is usable for any frequency f,
+ *     where f >= 7.97*b, where b is the bitrate. An example, the uart
+ *     can work with 115200 as long as a clock with frequency above 
+ *     918 kHz is available. 
  */ 
 module uart_m
-  # (parameter HASRXBYTEREGISTER = 1, // 0 : q from serial receivebuffer
+  # (parameter HASRXBYTEREGISTER = 0, // 0 : q from serial receivebuffer
      //                                  1 : q from byte buffer 
      SYSCLKFRQ = 12000000,            // System Clock Frequency in Hz
      BITCLKFRQ = 115200,              // Bit clock frequency in Hz
@@ -91,11 +105,9 @@ module uart_m
         output       bytercvd, // Status receive. True 1 bit period cycle only
         output [7:0] q //         Received byte from serial receive/byte buffer
         );
-   localparam integer PREDIVIDE_m1 = (SYSCLKFRQ+4*BITCLKFRQ)/(8*BITCLKFRQ) - 1;
    /*AUTOWIRE*/
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
    wire                 loadORtxce;             // From rxtxdiv_i of rxtxdiv_m.v
-   wire                 prediv_m_dummy;         // From prediv_i of prediv_m.v
    wire                 rst4;                   // From rxtxdiv_i of rxtxdiv_m.v
    wire                 rxce;                   // From rxtxdiv_i of rxtxdiv_m.v
    wire [1:0]           rxst;                   // From uartrx_i of uartrx_m.v
@@ -121,7 +133,7 @@ module uart_m
       .clk                              (clk),
       .rxce                             (rxce),
       .rxpin                            (rxpin));
-   rxtxdiv_m #(.PREDIVIDE_m1(PREDIVIDE_m1))
+   rxtxdiv_m
      rxtxdiv_i
      (/*AUTOINST*/
       // Outputs
@@ -140,7 +152,6 @@ module uart_m
      (/*AUTOINST*/
       // Outputs
       .bitx8ce                          (bitx8ce),
-      .prediv_m_dummy                   (prediv_m_dummy),
       // Inputs
       .clk                              (clk),
       .cte1                             (cte1));
@@ -252,80 +263,34 @@ r_tc  --+((--| I1 |   >_|    |               | r_tc
  Perturbation
  ------------ 
 
-  Assume the following: A 16 MHz clock, and we want 115200 bps.  At
+ Assume the following: A 16 MHz clock, and we want 115200 bps.  At
  first hand this seems simple, 16000000/115200=138.8 approx 139 clock
  cycles per bit time. But we need a x8 clock, and
  16000000/(115200*8)=17.36.  The closest we come directly is 17 as a
  predivider, but 16000000/(17*8)=117647, too far from 115200. This is
  disappointing - should it not be possible to transmit at 115200 when
  we have a clock that is 139 times faster? If we could count to 17.5,
- we would acheive a bitrate of 16000000/(17.5*8)=114286,
- acceptable. It is not difficult to count to 17.5, we alternately
- count to 17 and 18.
+ we would acheive a bitrate of 16000000/(17.5*8)=114286, acceptable. It
+ is not difficult to count to 17.5, we alternately count to 17 and 18.
  
  Example 2: A 4 MHz clock, and we want 115200. Ideal prescaler is
  4000000/(8*115200)=4.34, if we count to 4 five times, and to 5 three
  times, we count on average (8*4+3)/8 = 4.375, and can realize a
- bitrate of 4000000/(4.375*8)=114.284 for an error of 7.9% over a
+ bitrate of 4000000/(4.375*8)=114.286 for an error of 7.9% over a
  frame
  
  Example 3: A 1 MHz clock, and we want 115200.
- 1000000/(1.0625*8)=117647 for an error of 21.2% over a frame, high
- error, but this will probably work.  Here we want to divide by 1
- fifteen times, and by 2 one time: (16*1+1*1)/16 = 1.0625
+ 1000000/(1.0625*8)=117647 bps, an error of 0.21 UI over a frame.
+ We divide by 1 15 times, and 2 one time: (1*16+1)/16 = 1.0625.
  
  Assume we have a clock >= 8*bitrate. This is a prerequisite for this
  uart anyway. When we can perturb with a granularity of 4 bits, it
- follows that the maximum error we can have per averaged bit period is
+ follows that the maximum average error we can have per averaged bit period is
  (1/32)=0.03125 bit cycle. Over 10 bits this accumulates to an error
- of 31% This is high, but may work in many situations.
+ of 0.3 UI. Because we only sample 8 times in a bit period, the required
+ eye opening is around 0.3 + 0.13 = 0.43 UI.
  
- Assume we have a clock >= 16*bitrate. The error will be halved, and
- will maximum be 16% over a frame. Acceptable. Hence, as long as the
- clock is above 16 times the bitrate, this uart will work. Because we
- only sample 8 times in a bit period, the required eye-opening is
- 12.5+17, around 0.3 UI.
- 
- The perturbator could come in many forms
- Sequence         average  LogicCells Comment
- 0                0        0          No perturbator           Perturbator
- 0+1              1/2      1          ToggleFF                 FF itself
- 0+0+1            1/3      2          2-bit cnt, seq: 0,1,2    msb counter
- 0+1+1            2/3      2          2-bit cnt, seq: 1,2,3    msb counter
- 0+0+0+1          1/4      3          2-bit cnt, 0,1,2,3       cnt==3
- 0+1+1+1          3/4      3          2-bit cnt, 0,1,2,3       cnt!=0
- 0+0+0+0+1        1/5      3          2-bit cnt, 0,1,2,3,0     cy registered
- 0+1+1+1+1        4/5      3          2-bit cnt, 0,1,2,3,0     ~cy registered
- 0+0+0+0+0+1      1/6      4          3-bit cnt, 3,4,5,6,7,0   cy registered
- 1+1+1+1+1+0      5/6      4          3-bit cnt, 3,4,5,6,7,0   ~cy registered
- 0+0+0+0+0+0+1    1/7      4          3-bit cnt, 2,3,4,5,6,7,0 cy registered
- 0+0+0+1+0+0+1    2/7      4
- 0+1+0+1+0+0+1    3/7      4
- 1+0+1+0+1+1+0    4/7      4
- 1+1+1+0+1+1+0    5/7      4
- 1+1+1+1+1+1+0    6/7      4
- 0+0+0+0+0+0+0+1  1/8      4          3-bit cnt              cnt==111
- 0+0+1+0+0+1+0+1  3/8      4          3-bit cnt              cnt==010,101,111
- 1+1+0+1+1+0+1+0  5/8      4          3-bit cnt              cnt!=010,101,111
- 1+1+1+1+1+1+1+0  7/8      4          3-bit cnt              cnt!=111
- ... many more with periods:
-      9 : 1/9,2/9,4/9,5/9,7/9,8/9                                         5
-     10 : 1/10, 3/10, 7/10, 9/10                                          5
-     11 : 1/11, 2/11, 3/11, 4/11, 5/11, 6/11, 7/11, 8/11, 9/11, 10/11     5
-     12 : 1/12, 5/12, 7/12, 11/12                                         5
-     13 : 1/13,2/13,3/13,4/13,5/13,6/13,7/13,8/13,9/13,10/13,11/13,12/13  5
-     14 : 1/14, 3/14, 5/14, 9/14, 11/14, 13/14                            5
-     15 : 1/15, 2/15, 4/15, 6/15, 7/15, 8/15, 9/15, 11/15, 13/15, 14/15   5
- 0+0+0+0+0+0+0+0+0+0+0+0+0+0+0+1         1/16     5
- 0+0+0+0+1+0+0+0+0+1+0+0+0+0+1+0         3/16     5 
- 0+0+1+0+0+1+0+0+1+0+0+1+0+0+1+0         5/16     5 
- 0+1+0+1+0+1+0+1+0+1+0+1+0+1+0+0         7/16     5 
- 1+0+1+0+1+0+1+0+1+0+1+0+1+0+1+1         9/16     5 
- 1+1+0+1+1+0+1+1+0+1+1+0+1+1+0+1        11/16     5 
- 1+1+1+1+0+1+1+1+1+0+1+1+1+1+0+1        13/16     5 
- 1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+0        15/16     5 
-
- Life is to short to explore all of these. I concentrate on the
+ The perturbator could come in many forms, I concentrate on the
  following because the construction is regular. The perturbator
  require from 0 to 5 logicCells. Though size matters, an observation
  to make is that if several bits of perturbation is needed, the
@@ -351,8 +316,8 @@ r_tc  --+((--| I1 |   >_|    |               | r_tc
  0.938 15/16 1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+0  5  4-bit cnt cnt==...
     
  The counter is always incremented with bitx8ce as clock enable. They
- are arranged as binary counters, but I do not use carry. We have the
- following variants:
+ are arranged as binary counters, but I do not use the carry chain except if the
+ counter is 4 bits. We have the following variants:
 
  bitx8ce ----------+
        _________   |  ___
@@ -433,111 +398,425 @@ r_tc  --+((--| I1 |   >_|    |               | r_tc
  |                      >___|   |
  +------------------------------+
 
+ Todo. The above diagrams are not accurate, I avoid clock enable to 
+ possibly get better placement. 
  */
+
+/*
+ Unfortunately the following fails in iverilog 0.9.5, which do not allow
+ the genvar to be used in the local parameters and then tested upon.
+ */
+//module icarusfails_prediv_m
+//  #( parameter SYSCLKFRQ = 12000000, /* System Clock Frequency in Hz */
+//     BITCLKFRQ = 115200, /*             Bit Clock Frequency in Hz    */
+//     ACCEPTEDERROR_IN_PERCENT = 20  /*  How accurate must we be?     */
+//     ) (
+//        input         clk, cte1,
+//        output        bitx8ce
+//        );
+//   /* The control structures in Verilog is wanting, fortunately the
+//    * accuracy of the predivider is a monotonic function.
+//    */
+//   genvar             j;
+//   generate
+//      for ( j = 0; j < 6; j = j + 1 ) begin
+//         localparam integer predivide = 
+//                            ((1<<j)*SYSCLKFRQ+4*BITCLKFRQ) / (8*BITCLKFRQ);
+//         localparam real    bitfrq =  ((1<<j)*SYSCLKFRQ) / (predivide*8.0);
+//         localparam real    err = bitfrq > BITCLKFRQ ? 
+//                            (bitfrq - BITCLKFRQ)/BITCLKFRQ :
+//                            (BITCLKFRQ - bitfrq)/BITCLKFRQ;
+//         localparam integer next_predivide = 
+//                            ((1<<(j+1))*SYSCLKFRQ+4*BITCLKFRQ)/(8*BITCLKFRQ);
+//         localparam real    next_bitfrq =  
+//                            ((1<<(j+1))*SYSCLKFRQ) / (next_predivide*8.0);
+//         localparam real    next_err = next_bitfrq > BITCLKFRQ ? 
+//                            (next_bitfrq - BITCLKFRQ)/BITCLKFRQ :
+//                            (BITCLKFRQ - next_bitfrq)/BITCLKFRQ;
+//         if ( (predivide < 1)
+//              || (predivide >= 16'hffff) ) begin : blk0
+//            Illegal_Relationship_Between_SYSCLKFRQ_and_BITCLKFRQ illegal_i();
+//         end      
+//         if ( j == 0 &&  err * 1000 <= ACCEPTEDERROR_IN_PERCENT) begin 
+//            basic_prediv_m #( .PREDIVIDE(predivide))
+//            p0_i (/*AUTOINST*/
+//                  // Outputs
+//                  .bitx8ce              (bitx8ce),
+//                  // Inputs
+//                  .clk                  (clk),
+//                  .cte1                 (cte1));         
+//         end else if ( (      err * 1000 >  ACCEPTEDERROR_IN_PERCENT) &&
+//                       ( next_err * 1000 <= ACCEPTEDERROR_IN_PERCENT ) ) begin
+//            perturbated_prediv_m #( .PERTURBATOR_NRBITS(j+1), 
+//                                    .SCALEDPREDIVIDE(next_predivide) )
+//            pp (/*AUTOINST*/
+//                // Outputs
+//                .bitx8ce                (bitx8ce),
+//                // Inputs
+//                .clk                    (clk),
+//                .cte1                   (cte1));               
+//         end
+//      end
+//   endgenerate
+//endmodule
+
+/////////////////////////////////////////////////////////////////////////////
 module prediv_m
   #( parameter SYSCLKFRQ = 12000000, /* System Clock Frequency in Hz */
      BITCLKFRQ = 115200, /*             Bit Clock Frequency in Hz    */
      ACCEPTEDERROR_IN_PERCENT = 20  /*  How accurate must we be?     */
      ) (
         input         clk, cte1,
-        output        bitx8ce,prediv_m_dummy
+        output        bitx8ce
         );
-   localparam real    F_IDEALPREDIVIDE = SYSCLKFRQ / (BITCLKFRQ*8.0);
-   // Rules of rounding in Verilog seems to be truncate
-   localparam integer PREDIVIDE = (SYSCLKFRQ+4*BITCLKFRQ) / (8*BITCLKFRQ); 
-   localparam real    RESULTING_BITFRQ = SYSCLKFRQ / (PREDIVIDE*8.0);
-   localparam real    REL_ERR = RESULTING_BITFRQ > BITCLKFRQ ?
-                      (RESULTING_BITFRQ - BITCLKFRQ)/BITCLKFRQ :
-                      (BITCLKFRQ - RESULTING_BITFRQ)/BITCLKFRQ;
-   localparam real    REL_ERR_OVER_FRAME_IN_PERCENT = REL_ERR * 10 * 100;
-   localparam integer PREDIVIDE_m1 = PREDIVIDE - 1; 
-   localparam integer PRED_initval = (~PREDIVIDE_m1)+1;
-   genvar             j;
-   wire [15:0]        cy,c_cnt,r_cnt;
-   wire               c_tc,r_tc;
-
-   
-   /* A worked example. Assume SYSCLKFRQ = 4000000 Hz, BITCLKFRQ = 9600
-    *
-    * F_IDEALPREDIVIDE = 52.08
-    * PREDIVIDE = 52
-    * RESULTING_BITFRQ = 9615.4
-    * REL_ERR = 0.0026
-    * REL_ERR_OVER_FRAME_IN_PERCENT = 1.6
-    * 
-    * I arrange for the predivider to be a counter that uses the carry
-    * chain. The final carry out is registered, and this is the result
-    * of the prescaler. The predivider is an up-counter.
+   /* The control structures in Verilog is wanting, fortunately the
+    * accuracy of the predivider is a monotonic function. It seems 
+    * that I can't use the genvar when construction localparams, so
+    * I introduce a level of indirection. This has the complication
+    * that we must or together results, and tie of ungenerated results
+    * to 0 in the "kluge" module
     */
-   assign prediv_m_dummy = clk; // Vanity: Avoid a warning when PREDIVIDE_m == 0
+   genvar             j;
+   wire [5:0]         kluge_bitx8ce;
    generate
-
-      if ( (REL_ERR_OVER_FRAME_IN_PERCENT > ACCEPTEDERROR_IN_PERCENT)
-           || (PREDIVIDE_m1 < 0)
-           || (PREDIVIDE_m1 > 16'hffff) ) begin : blk0
-         AssertModule #(.FOBAR(-1000)) ChangeClockSolution();
+      for ( j = 0; j < 6; j = j + 1 ) begin
+         prediv_kluge_m #( .ITERATION(j), 
+                           .SYSCLKFRQ(SYSCLKFRQ), 
+                           .BITCLKFRQ(BITCLKFRQ), 
+                           .ACCEPTEDERROR_IN_PERCENT(ACCEPTEDERROR_IN_PERCENT))
+         kluge (// Outputs
+                .bitx8ce                (kluge_bitx8ce[j]),
+                /*AUTOINST*/
+                // Outputs
+                .prediv_kluge_m_dummy   (prediv_kluge_m_dummy),
+                // Inputs
+                .clk                    (clk),
+                .cte1                   (cte1));
       end
+   endgenerate
+   assign bitx8ce = |kluge_bitx8ce;
+endmodule
 
+/////////////////////////////////////////////////////////////////////////////
+// In this module, exactly one case will result in generated code.           
+module prediv_kluge_m
+  #( parameter ITERATION = 0,       /* Not pretty                   */
+     SYSCLKFRQ = 12000000,          /* System Clock Frequency in Hz */
+     BITCLKFRQ = 115200,            /* Bit Clock Frequency in Hz    */
+     ACCEPTEDERROR_IN_PERCENT = 20  /*  How accurate must we be?    */
+     ) (
+        input  clk, cte1,
+        output bitx8ce,prediv_kluge_m_dummy
+        );
+   localparam integer j = ITERATION;
+   localparam integer predivide = 
+                      ((1<<j)*SYSCLKFRQ+4*BITCLKFRQ) / (8*BITCLKFRQ);
+   localparam real    bitfrq =  ((1<<j)*SYSCLKFRQ) / (predivide*8.0);         
+   localparam real    err = bitfrq > BITCLKFRQ ? 
+                      (bitfrq - BITCLKFRQ)/BITCLKFRQ :
+                      (BITCLKFRQ - bitfrq)/BITCLKFRQ;
+   localparam integer next_predivide = 
+                      ((1<<(j+1))*SYSCLKFRQ+4*BITCLKFRQ) / (8*BITCLKFRQ);
+   localparam real    next_bitfrq =  
+                      ((1<<(j+1))*SYSCLKFRQ) / (next_predivide*8.0);
+   localparam real    next_err = next_bitfrq > BITCLKFRQ ? 
+                      (next_bitfrq - BITCLKFRQ)/BITCLKFRQ :
+                      (BITCLKFRQ - next_bitfrq)/BITCLKFRQ;
+
+   // Avoid warning in Synplify
+   assign prediv_kluge_m_dummy = clk | cte1;
+
+   generate
+      if ( (predivide < 1)
+           || (predivide >= 16'hffff) ) begin : blk0
+         Illegal_Relationship_Between_SYSCLKFRQ_and_BITCLKFRQ illegal_i();
+      end      
+      if ( j == 0 &&  err * 1000 <= ACCEPTEDERROR_IN_PERCENT) begin
+`ifdef SIMULATION
+         initial begin
+            $display( "Resulting bps: %f", bitfrq );
+         end
+`endif         
+         basic_prediv_m #( .PREDIVIDE(predivide))
+         p0_i (/*AUTOINST*/
+               // Outputs
+               .bitx8ce                 (bitx8ce),
+               .basic_prediv_m_dummy    (basic_prediv_m_dummy),
+               // Inputs
+               .clk                     (clk),
+               .cte1                    (cte1));         
+      end else if ( (      err * 1000 >  ACCEPTEDERROR_IN_PERCENT) &&
+                    ( next_err * 1000 <= ACCEPTEDERROR_IN_PERCENT ) ) begin
+`ifdef SIMULATION
+         initial begin
+            $display( "Resulting bps: %f", bitfrq );
+         end
+`endif         
+         perturbated_prediv_m #( .PERTURBATOR_NRBITS(j+1), 
+                                 .SCALEDPREDIVIDE(next_predivide) )
+         pp (/*AUTOINST*/
+             // Outputs
+             .bitx8ce                   (bitx8ce),
+             .perturbated_prediv_m_dummy(perturbated_prediv_m_dummy),
+             // Inputs
+             .clk                       (clk),
+             .cte1                      (cte1));               
+      end else begin
+         assign bitx8ce = 1'b0;
+      end
+   endgenerate
+endmodule
+
+
+/////////////////////////////////////////////////////////////////////////////
+module basic_prediv_m
+  # (parameter PREDIVIDE=1)
+   ( input clk,cte1,
+     output bitx8ce,basic_prediv_m_dummy
+     );
+   wire     c_tc,r_tc;
+   localparam PREDIVIDE_m1 = PREDIVIDE - 1;
+   localparam PRED_initval = (~PREDIVIDE_m1)+1;
+   
+   assign basic_prediv_m_dummy = c_tc | r_tc | cte1 | clk;
+   generate
       if ( PREDIVIDE_m1 == 0 ) begin
-         // No prescaler needed. 
+         // No prescaler needed.
          assign bitx8ce = cte1;
+         // To avoid warnings in Synplify
+         assign c_tc = cte1;
+         assign r_tc = cte1;
       end else if ( PREDIVIDE_m1 == 1 ) begin
-         // Special case, prescale by 2
+         // Special case, prescale by 2.0
          SB_LUT4 #(.LUT_INIT(16'h5555)) 
          cmb_tc( .O(c_tc), .I3(1'b0), .I2(1'b0), .I1(1'b0), .I0(r_tc));
          SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
          assign bitx8ce = r_tc;         
       end else if ( (PREDIVIDE_m1 & (PREDIVIDE_m1-1)) != 0 ) begin
          // General case, PREDIVIDE_m1 is not a power of 2.
-         assign cy[0] = cte1;
-         for ( j = 0; PREDIVIDE_m1 >> j; j = j + 1 ) begin
-            localparam b = (PRED_initval >> j);
-            localparam v = 16'h0330 + ((b&1)? 16'hcccc : 0);
-            
-            SB_LUT4  #(.LUT_INIT(v))
-            i_cnt( .O(c_cnt[j]), .I0(1'b0),
-                                         .I3(cy[j]),.I2(r_cnt[j]), .I1(r_tc));
-            SB_CARRY carry( .CO(cy[j+1]),.CI(cy[j]),.I1(r_cnt[j]), .I0(r_tc));
-            SB_DFF cnt_inst( .Q(r_cnt[j]), .C(clk), .D(c_cnt[j]) );
-
-            if ( (PREDIVIDE_m1 >> (j+1)) == 0 ) begin
-               SB_LUT4 #(.LUT_INIT(16'h0f00)) 
-               cmb_tc( .O(c_tc), .I3(cy[j+1]),.I2(r_tc), .I1(1'b0),  .I0(1'b0));
-               SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
-            end
-         end
-         assign bitx8ce = r_tc;         
+         // Code is equal with code for a perturbator with 
+         // 0 bits of fractional divide
+         perturbated_prediv_m #( .PERTURBATOR_NRBITS(0), 
+                                 .SCALEDPREDIVIDE(PREDIVIDE))
+         pp_i (/*AUTOINST*/
+               // Outputs
+               .bitx8ce                 (bitx8ce),
+               .perturbated_prediv_m_dummy(perturbated_prediv_m_dummy),
+               // Inputs
+               .clk                     (clk),
+               .cte1                    (cte1));
+         // To avoid warnings in Synplify
+         assign c_tc = cte1;
+         assign r_tc = cte1;
       end else begin
-         // When PREDIVIDE_m1 is a power of 2. This code could be merged
-         // with the general case, this is not done for a semblance of clarity.
-         assign cy[0] = cte1;
-         for ( j = 0; PREDIVIDE_m1 >> (j+1); j = j + 1 ) begin
-            SB_LUT4 #(.LUT_INIT(16'h0330))
-            i_cnt( .O(c_cnt[j]), .I0(1'b0),
-                                         .I3(cy[j]),.I2(r_cnt[j]), .I1(r_tc));
-            SB_CARRY carry( .CO(cy[j+1]),.CI(cy[j]),.I1(r_cnt[j]), .I0(r_tc));
-            SB_DFF cnt_inst( .Q(r_cnt[j]), .C(clk), .D(c_cnt[j]) );
-            if ( (PREDIVIDE_m1 >> (j+2)) == 0 ) begin
-               SB_LUT4 #(.LUT_INIT(16'h0f00)) 
-               cmb_tc( .O(c_tc), .I3(cy[j+1]),.I2(r_tc), .I1(1'b0),  .I0(1'b0));
-               SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
-            end
-         end
-         assign bitx8ce = r_tc;         
+         // When PREDIVIDE_m1 is a power of 2 and there is no perturbation. 
+         // This code could be merged with the general case, this is not done 
+         // for a semblance of clarity.
+         basic_prediv_spescase_m #( .PREDIVIDE_m1(PREDIVIDE_m1))
+           ppp(/*AUTOINST*/
+               // Outputs
+               .bitx8ce                 (bitx8ce),
+               // Inputs
+               .clk                     (clk),
+               .cte1                    (cte1));
+         // To avoid warnings in Synplify
+         assign c_tc = cte1;
+         assign r_tc = cte1;
       end
    endgenerate
 endmodule
 
-//////////////////////////////////////////////////////////////////////////////
-// Strange but true - Verilog 2001 do not have compile time assert.
-// This solution is not good enough, it does not lead to a fatal error
-// during compile. Work to do.
-module AssertModule
-  #( parameter FOBAR = 1 )
-  ( input AssertFailed,
-    output [FOBAR:0] AssertKluge);
-   assign AssertKluge = AssertFailed;
+/////////////////////////////////////////////////////////////////////////////
+module basic_prediv_spescase_m
+  # (parameter PREDIVIDE_m1=2)
+   ( input clk,cte1,
+     output bitx8ce
+     );
+   wire [15:0] cy,c_cnt,r_cnt;
+   wire        c_tc,r_tc;
+   genvar      j;
+   
+   generate
+      assign cy[0] = cte1;
+      for ( j = 0; PREDIVIDE_m1 >> (j+1); j = j + 1 ) begin
+         SB_LUT4 #(.LUT_INIT(16'h0330))
+         i_cnt( .O(c_cnt[j]), .I0(1'b0),
+                .I3(cy[j]),.I2(r_cnt[j]), .I1(r_tc));
+         SB_CARRY carry( .CO(cy[j+1]),.CI(cy[j]),.I1(r_cnt[j]), .I0(r_tc));
+         SB_DFF cnt_inst( .Q(r_cnt[j]), .C(clk), .D(c_cnt[j]) );
+         if ( (PREDIVIDE_m1 >> (j+2)) == 0 ) begin
+            SB_LUT4 #(.LUT_INIT(16'h0f00)) 
+            cmb_tc( .O(c_tc), .I3(cy[j+1]),.I2(r_tc), .I1(1'b0),  .I0(1'b0));
+            SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
+         end
+      end
+   endgenerate
+   assign bitx8ce = r_tc;         
 endmodule
+
+/////////////////////////////////////////////////////////////////////////////
+module perturbated_prediv_m
+  # (parameter PERTURBATOR_NRBITS=1, SCALEDPREDIVIDE=1 )
+   ( input clk,cte1,
+     output bitx8ce,perturbated_prediv_m_dummy
+     );
+   wire [15:0] c_cnt,r_cnt;
+   wire        r_tc;
+   wire        r_perturb;
+   wire [3:0]  r_pcnt;
+   genvar      j;
+   localparam integer predivide     = (SCALEDPREDIVIDE>>PERTURBATOR_NRBITS);
+   localparam integer predivide_m1  = predivide-1;
+   localparam integer pred_initval  = (~predivide_m1)+1;
+   localparam integer pred_perturb_initval = pred_initval-1;
+
+   assign perturbated_prediv_m_dummy = cte1;
+`ifdef SIMULATION
+   initial begin
+      $display( "Input: Nr perturb.bits  = %d", PERTURBATOR_NRBITS);
+      $display( "Input: Scaled_predivide = %d", SCALEDPREDIVIDE );
+      $display( "  ..want Prescaler divide=%f", 
+                SCALEDPREDIVIDE/(1.0*(1<<PERTURBATOR_NRBITS)) );
+      $display( "predivide = %d", predivide );
+   end
+`endif
+
+   generate
+      if ( PERTURBATOR_NRBITS > 4 ) begin
+         Can_not_honour_requested_accuracy illegal_perturb_i();
+      end else if ( PERTURBATOR_NRBITS == 4 ) begin
+         // 4-bit binary counter using a carry chain
+         wire [3:0] cyp, c_pcnt;
+         assign cyp[0] = 1'b1;
+         for ( j = 0; j < 4; j = j + 1 ) begin : blkA
+            SB_LUT4 #(.LUT_INIT(16'hd278)) cntfour
+                   ( .O(c_pcnt[j]),.I3(cyp[j]), 
+                     .I2(r_pcnt[j]), .I1(1'b0), .I0(r_tc));
+            if ( j != 3 )
+              SB_CARRY pcy
+                (.CO(cyp[j+1]), 
+                 .CI(cyp[j]), .I1(r_pcnt[j]), .I0(1'b0));
+            SB_DFF pcntr( .Q(r_pcnt[j]), .C(clk), .D(c_pcnt[j]));
+         end
+      end else if ( PERTURBATOR_NRBITS > 0 ) begin
+         wire [3:0] c_pcnt;
+         SB_LUT4 #(.LUT_INIT(16'h6666)) pcnt_i0
+           ( .O(c_pcnt[0]), .I3(1'b0), .I2(1'b0), .I1(r_tc), .I0(r_pcnt[0]));
+         SB_DFF perturbreg0_i( .Q(r_pcnt[0]), .C(clk), .D(c_pcnt[0]));
+         if ( PERTURBATOR_NRBITS > 1 ) begin
+            SB_LUT4 #(.LUT_INIT(16'h6c6c)) pcnt_i1
+              (.O(c_pcnt[1]), .I3(1'b0), .I2(r_tc), .I1(r_pcnt[1]), 
+               .I0(r_pcnt[0]));
+            SB_DFF perturbreg1_i( .Q(r_pcnt[1]), .C(clk), .D(c_pcnt[1]));
+            if ( PERTURBATOR_NRBITS > 2 ) begin
+               SB_LUT4 #(.LUT_INIT(16'h78f0)) pcnt_i2
+                 (.O(c_pcnt[2]), .I3(r_tc), .I2(r_pcnt[2]), .I1(r_pcnt[1]), 
+                  .I0(r_pcnt[0]));
+               SB_DFF perturbreg2_i( .Q(r_pcnt[2]), .C(clk), .D(c_pcnt[2]));
+               if ( PERTURBATOR_NRBITS > 4 ) begin
+                  Unsupported illegalGT4_i();                  
+               end
+            end 
+         end
+      end
+      // For waveform display it is nice to define bits not used in synthesis
+      for ( j = PERTURBATOR_NRBITS; j < 4; j = j + 1 ) begin
+         assign r_pcnt[j] = 1'b0;
+      end
+      if ( PERTURBATOR_NRBITS == 0 ) begin
+        assign r_perturb = 1'b0;
+      end else if ( PERTURBATOR_NRBITS == 1 ) begin
+         assign r_perturb = r_pcnt[0];
+      end else begin
+         /* There is some gymnastics to select the right LUT value for
+          * the perturbation. This is not made any easier by iverilog 0.9.5,
+          * where we can't select out of a localparam.
+          */
+         localparam plutval_4
+           //                4  3  2  1
+           = { 16'hfffe, // 15
+               16'hfefe, //     7
+               16'hfbde, // 13
+               16'heeee, //        3
+               16'hedb6, // 11
+               16'h6b6b, //     5  
+               16'hd56a, //  9
+               16'haaaa, //           1   Not in use
+               16'h2a95, //  7
+               16'h9494, //     3
+               16'h1249, //  5
+               16'h1111, //        1
+               16'h0421, //  3
+               16'h0101, //     1
+               16'h0001, //  1
+               16'h0000  //               Not in use
+               };
+         localparam inx = SCALEDPREDIVIDE & ((1<<PERTURBATOR_NRBITS)-1);
+         localparam plutvalinx = inx << (4-PERTURBATOR_NRBITS);
+         localparam v = (plutval_4 >> (16*plutvalinx)) & 16'hffff;
+         wire cmb_perturb;
+`ifdef SIMULATION
+         initial begin
+            $display( "inx = %d, plutvalinx = %d, v = %h",inx, plutvalinx, v );
+         end
+`endif
+         SB_LUT4 #(.LUT_INIT(v))
+         cmb_pert( .O(cmb_perturb), .I3(r_pcnt[3]), .I2(r_pcnt[2]),
+                   .I1(r_pcnt[1]),.I0(r_pcnt[0]));
+         SB_DFF reg_pert( .Q(r_perturb), .C(clk), .D(cmb_perturb));
+      end
+   endgenerate
+
+   /*
+    * The above generate took care of the perturbation. The following
+    * generate takes care of the prescaler proper. 
+    */
+   generate
+      if ( predivide_m1 == 0 ) begin
+         // Special case, divide by less than 2, but perturbation needed
+         // Here I must let r_tc be combinatorical, I abuse my naming.
+         SB_LUT4 #(.LUT_INIT(16'h777)) spes_tc_combinatorical
+           (.O(r_tc), .I3(1'b0),.I2(1'b0),.I1(r_perturb),.I0(r_cnt[0]));
+         SB_LUT4 #(.LUT_INIT(16'h777)) c_msb
+           (.O(c_cnt[0]), .I3(1'b0),.I2(1'b0),.I1(r_perturb),.I0(r_cnt[0]));
+         SB_DFF cnt_lsb( .Q(r_cnt[0]), .C(clk), .D(c_cnt[0]));
+         assign bitx8ce = r_tc;
+      end else begin
+         wire [15:0] cy;
+         assign cy[0] = cte1;
+         //for ( j = 0; predivide_m1 >> j; j = j + 1 ) begin 
+         //(above replaced for nice sim display)
+         for ( j = 0; 16'hffff >> j; j = j + 1 ) begin
+            if ( (predivide_m1 >> j) == 0 ) begin
+               assign r_cnt[j] = 0; // For waveform display in simulation
+            end else begin
+               wire c_tc;
+               localparam bitinit_no_perturb = pred_initval >> j;
+               localparam bitinit_perturb    = pred_perturb_initval >> j;
+               localparam v 
+                 = 16'h0330 
+                   + ( (bitinit_no_perturb & 1) ? 16'h4444 : 16'h0000)
+                     +  ( (bitinit_perturb & 1) ? 16'h8888 : 16'h0000);
+            SB_LUT4 #(.LUT_INIT(v)) i_cnt
+              ( .O(c_cnt[j]), 
+                .I3(cy[j]), .I2(r_cnt[j]), .I1(r_tc), .I0(r_perturb));
+               SB_CARRY carry
+                 ( .CO(cy[j+1]),
+                   .CI(cy[j]), .I1(r_cnt[j]), .I0(r_tc));
+               SB_DFF cnt_inst( .Q(r_cnt[j]), .C(clk), .D(c_cnt[j]));
+               if ( (predivide_m1 >> (j+1)) == 0 ) begin
+                  SB_LUT4 #(.LUT_INIT(16'h0f00)) 
+                  cmb_tc( .O(c_tc),.I3(cy[j+1]),.I2(r_tc),.I1(1'b0),.I0(1'b0));
+                  SB_DFF reg_tc( .Q(r_tc), .C(clk), .D(c_tc));
+               end            
+            assign bitx8ce = r_tc;
+            end
+         end
+      end
+   endgenerate
+endmodule
+
+
 
 /* 
  //////////////////////////////////////////////////////////////////////////////
@@ -716,7 +995,7 @@ endmodule
   
  Also want a freerunning 3-bit counter, but resettable to half-full. 
  We do this with an upcounter. This is the receive clock enable.
- 
+                                           ALWAYS USE THIS CASE 
                PREDIVIDE_m1 != 0 |                PREDIVIDE_m1 == 0:
                (rxcy & ce) |     |                ((ARMD | RECV) & rxcy & ce) |
                (GRCE & rxpin)    |                (GRCE & rxpin)              |
@@ -784,7 +1063,6 @@ rxst[1]-(---   I3
  * In addition rst4, placed here to save a LUT.
  */
 module rxtxdiv_m
-  #( parameter PREDIVIDE_m1 = 44)
   (
    input       clk,bitx8ce,load,rxpin,
    input [1:0] rxst,
@@ -828,7 +1106,6 @@ module rxtxdiv_m
    i_rst(.O(rst4), .I3(rxst[1]),          .I2(1'b0),.I1(bitx8ce), .I0(rxst[0]));
    SB_CARRY i_andcy(.CO(cy[8]),.CI(cy[7]),.I1(1'b0),.I0(bitx8ce));
    generate 
-//      localparam v = PREDIVIDE_m1 == 0 ? 16'hfc30 : 16'hff20;
       localparam v = 16'hfc30; // Seems I do not need two cases.
       SB_LUT4 #(.LUT_INIT(v))
       i_rxce( .O(c_rxce), .I3(cy[8]), .I2(rxpin), .I1(rxst[1]), .I0(rxst[0]));
@@ -926,7 +1203,7 @@ module uartrxsm_m
    wire [1:0]   nxt_rxst;
    
    SB_LUT4 #(.LUT_INIT(16'h5303))
-   stnxt1_i( .O(nxt_rxst[1]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(lastbit));
+   stnxt1_i( .O(nxt_rxst[1]),.I3(rxst[1]),.I2(rxst[0]),.I1(rxpin),.I0(lastbit));
    SB_LUT4 #(.LUT_INIT(16'hf300))
    stnxt0_i( .O(nxt_rxst[0]), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin),.I0(1'b0));
    SB_DFFE r_st0( .Q(rxst[0]), .C(clk), .E(rxce), .D(nxt_rxst[0]));
@@ -1046,7 +1323,7 @@ endmodule
  12 LogicCells for transmit part
      0  Prescaler
      4  txce counter 8
-     4  rxce counter 8/4  9615 bps, 1.6% error over a byte
+     4  rxce counter 8/4  
   8     for bit clocks
  -------------
  40 LogicCells total
