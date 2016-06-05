@@ -20,24 +20,61 @@ module tst;
    reg        base_clk;
    reg        rx_clk;
    reg        tx_clk;
+
+   function real bnabs;
+      input real v;
+      bnabs = v >= 0 ? v : -v;
+   endfunction
+     
    localparam MEGA = 1000000;
-   localparam SYSCLKFRQ = 12*MEGA; 
+   localparam ACCEPTEDERROR_IN_PERCENT = 2;
+//    localparam BITCLKFRQ = 10;
+// //   localparam SYSCLKFRQ = 10*8*6;  // 6
+// //   localparam SYSCLKFRQ = 10*4*13; // 6.5
+// //   localparam SYSCLKFRQ = 10*2*25; // 6.25
+// //   localparam SYSCLKFRQ = 10*2*27; // 6.75
+// //   localparam SYSCLKFRQ = 10*1*49; // 6.125
+// //   localparam SYSCLKFRQ = 10*1*51; // 6.375
+// //   localparam SYSCLKFRQ = 10*1*53; // 6.625
+// //   localparam SYSCLKFRQ = 10*1*55; // 6.875
+// //   localparam SYSCLKFRQ = 5*1*97;  // 6.0625
+// //   localparam SYSCLKFRQ = 5*1*99;  // 6.1875
+// //   localparam SYSCLKFRQ = 5*1*101; // 6.3125
+// //   localparam SYSCLKFRQ = 5*1*103; // 6.4375
+// //   localparam SYSCLKFRQ = 5*1*105; // 6.5625
+// //   localparam SYSCLKFRQ = 5*1*107; // 6.6875
+// //   localparam SYSCLKFRQ = 5*1*109; // 6.8125
+// //   localparam SYSCLKFRQ = 5*1*111; // 6.9375
+// 
+// //   localparam SYSCLKFRQ = 10*8*1;  // 1.0000
+// //   localparam SYSCLKFRQ = 5*1*17;  // 1.0625
+// //   localparam SYSCLKFRQ = 10*1*9;  // 1.1250
+// //   localparam SYSCLKFRQ = 5*1*19;  // 1.1875
+// //   localparam SYSCLKFRQ = 10*2*5;  // 1.2500
+// //   localparam SYSCLKFRQ = 5*1*21;  // 1.3125
+// //   localparam SYSCLKFRQ = 10*1*11; // 1.3750 
+// //   localparam SYSCLKFRQ = 5*1*23;  // 1.4375
+// //   localparam SYSCLKFRQ = 10*4*3;  // 1.5000
+// //   localparam SYSCLKFRQ = 5*1*25;  // 1.5625
+// //   localparam SYSCLKFRQ = 10*1*13; // 1.6250 
+// //   localparam SYSCLKFRQ = 5*1*27;  // 1.6875
+// //   localparam SYSCLKFRQ = 10*2*7;  // 1.7500 
+// //   localparam SYSCLKFRQ = 5*1*29;  // 1.8125
+// //   localparam SYSCLKFRQ = 10*1*15; // 1.8750
+// //   localparam SYSCLKFRQ = 5*1*31;  // 1.9375
+// //   localparam SYSCLKFRQ = 10*8*2;  // 2.0000
+// 
+// //   localparam SYSCLKFRQ = 10*8*9;  // 9
+// //   localparam SYSCLKFRQ = 10*4*19;  // 9.5
+   
+   localparam SYSCLKFRQ = 12*MEGA;
    localparam BITCLKFRQ = 115200;
-
    localparam SIMTOCY = 5 * 10* SYSCLKFRQ/(BITCLKFRQ);
-   localparam ACCEPTEDERROR_IN_PERCENT = 20;
-   localparam real    F_IDEALPREDIVIDE = SYSCLKFRQ / (BITCLKFRQ*8.0);
-   localparam integer PREDIVIDE = (SYSCLKFRQ+BITCLKFRQ*4) / (BITCLKFRQ*8); 
-   localparam real    RESULTING_BITFRQ = SYSCLKFRQ / (PREDIVIDE*8.0);
-   localparam real    REL_ERR = RESULTING_BITFRQ > BITCLKFRQ ?
-                      (RESULTING_BITFRQ - BITCLKFRQ)/BITCLKFRQ :
-                      (BITCLKFRQ - RESULTING_BITFRQ)/BITCLKFRQ;
-   localparam real    REL_ERR_OVER_FRAME_IN_PERCENT = REL_ERR * 10 * 100;
-
+   
    /*AUTOWIRE*/
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
    wire                 bytercvd;               // From dut_rx of uart_m.v
-   wire [7:0]           q;                      // From dut_rx of uart_m.v
+   wire [7:0]           q;                       // From dut_rx of uart_m.v
    wire                 txbusy;                 // From dut_tx of uart_m.v
    wire                 txpin;                  // From dut_tx of uart_m.v
    // End of automatics
@@ -45,16 +82,7 @@ module tst;
    always # 20 base_clk = ~base_clk;
    assign cte1 = 1'b1;
 
-   
-
    initial begin
-      $display( "Predivide value %d (ideal %f)", PREDIVIDE, F_IDEALPREDIVIDE );
-      $display( "Resulting bitrate : %d", RESULTING_BITFRQ );
-      $display( "Error over (startbit,byte,stopbit) in %% of bit period: %f", 1000*REL_ERR );
-      if ( REL_ERR_OVER_FRAME_IN_PERCENT > ACCEPTEDERROR_IN_PERCENT ) begin
-         $display( "Can not realize this usart, aborts" );
-         $finish;
-      end
       $dumpfile("tst.lxt");
       $dumpvars(0,tst);
       simtocy = SIMTOCY;
@@ -124,7 +152,9 @@ module tst;
    // phases of the clocks.
    assign dummy_rxpin = 0;
    uart_m
-     #( .SYSCLKFRQ(SYSCLKFRQ), .BITCLKFRQ(BITCLKFRQ), .HASRXBYTEREGISTER(1'b1))
+     #( .SYSCLKFRQ(SYSCLKFRQ), .BITCLKFRQ(BITCLKFRQ), 
+        .ACCEPTEDERROR_IN_PERCENT(ACCEPTEDERROR_IN_PERCENT), 
+        .HASRXBYTEREGISTER(1'b1))
    dut_tx
      (// Outputs
       .bytercvd(dummy_bytercvd),
@@ -143,7 +173,8 @@ module tst;
       .d                                (d[7:0]));
    
    uart_m
-     #( .SYSCLKFRQ(SYSCLKFRQ), .BITCLKFRQ(BITCLKFRQ), .HASRXBYTEREGISTER(1'b1))
+     #( .SYSCLKFRQ(SYSCLKFRQ), .BITCLKFRQ(BITCLKFRQ), .HASRXBYTEREGISTER(1'b1),
+        .ACCEPTEDERROR_IN_PERCENT(ACCEPTEDERROR_IN_PERCENT))
    dut_rx
      (// Outputs
       .txpin(    dummy_txpin    ),
