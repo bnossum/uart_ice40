@@ -23,7 +23,8 @@
  */
 
 module top
-  ( inout PIO3_08,PIO3_07,PIO1_14,PIO1_02,GBIN6
+  ( input PIO3_08, GBIN6,
+    output PIO3_07, PIO1_14, PIO1_02
     );
    wire [7:0] d;
    wire       clk,cte1,rxpinmeta1,c_rxpinmeta1,rxpin;
