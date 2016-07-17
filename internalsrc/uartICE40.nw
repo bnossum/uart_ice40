@@ -2,7 +2,7 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Introduction}
- 
+
 \section{Features}
 \begin{itemize}
 \item Specifically written for iCE40
@@ -12,44 +12,44 @@
 \item Samples RX pin 8 (default) or 16 times per bit period
 \end{itemize}
 
-\section{Project scope}
+\subsection*{A note on nomenclature}
+In practical terms, the [[usart]]\footnote{[[usart]]: Universal,
+  synchronous/asynchronous receiver transmitter. This implies that it
+  can be used synchrounous with an external clock. ``universal''
+  denotes that one can select the number of data bits and stop bits,
+  and whether (odd or even) parity is to be used or not.}
+is nearly always used asynchronously, with 8 data bits.  There are
+still applications that relies on 1 or 2 stop bits, and odd or even
+parity, but a large majority of applications uses 1 stop bit, no
+parity. The module described in this paper should perhaps be called an
+[[art]] (asynchronous receiver/transmitter), but I bow to conventions
+and call the module an ``uart''.
+
+\section{Project scope and documentation}
 Two verilog source code files, [[uartICE40]] and [[uartICE40hl]] are
 the result of this project. The rest of the files are just there to
-verify that those two files are correct. 
+verify that those two files are correct. The files [[uartICE40]] and
+[[uartICE40hl]] should be functionally identical. While [[uartICE40]]
+is written using primitives of the iCE40 architecture, the
+corrsponding ``high-level'' [[uartICE40hl]] is syntetized from
+standard Verilog. Motivation for two different implementations is
+simply that it is cumbersome to understand a low level implementation
+that relies on explicitly instantiated LUTs.
 %
 FPGA projects often have many dependencies, and files. Users of the
 two files above will need to move the files to relevant locations,
 
-\section{Documentation}
-Documentation and code is generated using noweb\footnote{For those unfamiliar
+%\section{Documentation}
+Documentation and code is generated using noweb.\footnote{For those unfamiliar
 with noweb -  it is a tool that allow writing of documentation and of
 code in the same textfile. A definite advantage is that the code that
-is documented is indeed the code that is generated.} Because it is
-cumbersome to understand a low level implementation that relies on
-explicitly instantiated LUTs, I also provide corresponding ``high-level''
-implementations that should be somewhat more readable.
-
-It is a paradox that the documentation of such a small and easy module
+is documented is indeed the code that is generated.} 
+It is a paradox that documentation of such a small and easy module
 extends to \pageref{bnLastpage}\ pages.
-% \subsection*{A note on nomenclature}
-% A [[usart]] is a universal, synchronous/asynchronous receiver
-% transmitter. This implies that it can be used synchrounous with an
-% external clock. ``universal'' denotes that one can select the number
-% of data bits and stop bits.
-% A [[uart]] is similar, but can not be used synchronous with an
-% external clock.
-% 
-% In practical terms, the ``usart'' is nearly always used
-% asynchronously, with 8 data bits. There are still applications that
-% relies no 1 or 2 stop bits, and odd or even parity, but a large
-% majority of applications uses 1 stop bit, no parity. The module
-% described in this paper should perhaps be called an [[art]]
-% (asynchronous receiver/transmitter), but here I bow to conventions and
-% still call the module ``uart''.
 
 @ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%                
 \chapter{Top level}
-Regardless of whether the implementation is high or low leve,
+Regardless of whether the implementation is high or low level,
 [[uartICE40]] has the following interface:
 <<module head>>=
 <<notindoc:commentline>>
@@ -383,7 +383,7 @@ filter on the [[rxpin]].
 Note that after the last data bit has been sampled, the state machine
 goes to [[GRCE]]. The bitclock divider unit know when the receive
 state machine is in [[GRCE]], and if it sees a high data bit, it will
-(prematurely) gie a [[rxce]], this will then lead to a quicker entry
+(prematurely) give a [[rxce]], this will then lead to a quicker entry
 to the [[HUNT]] state. An advantage is slighly more tolerant limits on
 a (too fast) receive data stream, a disadvantage is that the [[rxpin]]
 is used in two consequtive clock cycles, hence in case of noisy input
@@ -682,7 +682,7 @@ Total size is 12+11+9 = 32 logicCells when we oversample 8 times, and
 \chapter{Testbench}
 A previous implementation of the uart generated the x8 (or x16) bit
 clock internal to the module. This complicated simulation. Now that
-the important [[bitxce]] input is external to the usart, testing is
+the important [[bitxce]] input is external to the uart, testing is
 simplified.
 <<../src/tbuartICE40.v>>=
 <<notindoc:MIT Licence>>
@@ -1029,20 +1029,20 @@ Device Utilization Summary
 \end{lstlisting}
 
 \noindent{}Note that no carry-chain resources are used above. The
-high-level implementation use resources to find out if the transmit
+high-level implementation use LUTs to find out if the transmit
 buffer is empty. 
 
 \chapter{Conclusion}
+The low level implementation uses 32 logicCells, while the high level
+implementation uses 39 logicCells. This is a lot of effort (and near
+unreadable code) for a meagre saving of 7 logiCells.
+If I had been able to write a good high-level module from the very
+start, a lot of effort had been saved. However, the high-level module
+was made {\emph{after}} the low-level module, and reflects the design
+choices of the low-level module. A conclusion must be: Think
+low-level, code high-level.
 
-7 less logicCells is the meagre gains for a lot of low-level effort
-with near unreadable code. On the other hand, it represents a 20\%
-reduction in use of resources. If I had been able to write a good
-high-level module from the very start, a lot of effort had been
-saved. However, the high-level module was made {\emph{after}} the
-low-level module, and reflects the desigh choices of the low-level
-module. A conclusion must be: Think low-level, code high-level.
-
-This concludes the documentation of a simulated and tested small
+And this ends the documentation of a simulated and tested small
 asynchronous receiver/transmitter specifically written for iCE40
 FPGAs.
 

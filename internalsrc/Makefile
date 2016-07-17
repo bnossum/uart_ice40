@@ -19,11 +19,14 @@ DIR_GUARD=@mkdir -p $(@D)
 
 all: doc code sim
 
-doc:$(DOCDIR)/$(PN).pdf
-code:$(CODEDIR)/uartICE40hl.v $(CODEDIR)/uartICE40.v $(CODEDIR)/tbuartICE40.v \
+THEDOC=$(DOCDIR)/$(PN).pdf
+THECODE=$(CODEDIR)/uartICE40hl.v $(CODEDIR)/uartICE40.v $(CODEDIR)/tbuartICE40.v \
 	$(CODEDIR)/icestickuart.v
-sim:$(OBJDIR)/tst00.lxt $(OBJDIR)/tst01.lxt $(OBJDIR)/tst10.lxt $(OBJDIR)/tst11.lxt \
+THESIM=$(OBJDIR)/tst00.lxt $(OBJDIR)/tst01.lxt $(OBJDIR)/tst10.lxt $(OBJDIR)/tst11.lxt \
 	$(OBJDIR)/ltst00.lxt $(OBJDIR)/ltst01.lxt $(OBJDIR)/ltst10.lxt $(OBJDIR)/ltst11.lxt 
+doc:$(THEDOC)
+code:$(THECODE)
+sim:$(THESIM)
 
 # Documentation
 $(DOCDIR)/$(PN).pdf:$(OBJDIR)/$(PN_DOC_WRAP).tex $(OBJDIR)/e$(PN).tex
@@ -130,3 +133,6 @@ $(OBJDIR)/ltst11.lxt:$(CODEDIR)/tbuartICE40.v $(CODEDIR)/uartICE40.v
 	vvp $(OBJDIR)/w1 -lxt
 
 
+clean:
+	rm -f $(PN_DOC_WRAP).* $(THEDOC) $(THECODE) $(THESIM)
+	rm -f $(OBJDIR)/$(PN_DOC_WRAP).tex $(OBJDIR)/e$(PN).tex $(OBJDIR)/$(PN).tex $(OBJDIR)/w1 
