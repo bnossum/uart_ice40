@@ -27,7 +27,7 @@ and call the module an ``uart''.
 
 \section{Project scope and documentation}
 Two verilog source code files, [[uartICE40]] and [[uartICE40hl]] are
-the result of this project. The rest of the files are just there to
+the results of this project. The rest of the files are just there to
 verify that those two files are correct. The files [[uartICE40]] and
 [[uartICE40hl]] should be functionally identical. While [[uartICE40]]
 is written using primitives of the iCE40 architecture, the
@@ -372,26 +372,6 @@ endmodule
    initial rxst = 0;
 `endif
 @ %
-When hunting for a start bit ([[HUNT]]), if the [[rxpin]] is low, the state
-machine transitions into the armed state ([[ARMD]]). After 1/2 bit
-time, [[rxpin]] is resampled. If it is low, we conclude a start bit
-has been seen. If the input is noisy, this is likely to be a bad
-implementation, but easily corrected by applying a digital low-pass
-filter on the [[rxpin]].
-@
-
-Note that after the last data bit has been sampled, the state machine
-goes to [[GRCE]]. The bitclock divider unit know when the receive
-state machine is in [[GRCE]], and if it sees a high data bit, it will
-(prematurely) give a [[rxce]], this will then lead to a quicker entry
-to the [[HUNT]] state. An advantage is slighly more tolerant limits on
-a (too fast) receive data stream, a disadvantage is that the [[rxpin]]
-is used in two consequtive clock cycles, hence in case of noisy input
-we may lose bytes. There is perhaps room for improvement here.
-@
-
-@ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Low level implementation}
 \begin{figure}
 \begin{lstlisting} 
  rxst msb    other_bits
@@ -433,6 +413,55 @@ rxst[1] -----(-+-----|I2  |  |  >  |  |
 \end{lstlisting}
 \caption{Small sketch of receive shift register}
 \end{figure}
+When hunting for a start bit ([[HUNT]]), if the [[rxpin]] is low, the state
+machine transitions into the armed state ([[ARMD]]). After 1/2 bit
+time, [[rxpin]] is resampled. If it is low, we conclude a start bit
+has been seen. If the input is noisy, this is likely to be a bad
+implementation, but easily corrected by applying a digital low-pass
+filter on the [[rxpin]].
+@
+
+After the last data bit has been sampled, we need a way to get back to
+[[HUNT]] for the next byte. We can not go directly to [[HUNT]] because
+we are in the middle of the last data bit, which may very well be a
+1'b0, and would be mistaken for the start of a start bit. There are
+several ways to handle this situation.
+@
+\begin{itemize}
+\item We can stupidly sample one more bit, it should be high (the
+  frame bit), and we then give an information of a failed frame bit if
+  it turns out to be low.
+@
+\item We can change how we detect the start of a start bit, and
+  demand a high to low transition on the receive line.
+@
+\item we can go to a state [[GRCE]] after sampling the last data bit,
+  and change how we generate [[rxce]]. If we generate [[rxce]] each
+  clock cycle we are in state [[GRCE]] and monitor the receive line,
+  we can go to state [[HUNT]] when we see a transition on the receive
+  line to 1'b1. 
+\end{itemize}
+@
+
+The last two alternatives are probably equivalent, and we implement
+the ultimate alternative.  After the last data bit has been sampled,
+the state machine goes to [[GRCE]]. The bitclock divider unit know
+when the receive state machine is in [[GRCE]], and if it sees a high
+data bit, it will give a [[rxce]], this will then lead to a quicker
+entry to the [[HUNT]] state.
+%
+This way to treat the stop bit is very permissive. A few cycles of
+stop bit is all that is needed to put the receiver state machine on
+its tracks again.
+%
+A possible disadvantage is that the [[rxpin]]
+will be accessed in two consequtive clock cycles just when a stop bit
+starts (in case d[7] was low), and on a noisy line this may then give
+a false start bit. There is perhaps room for improvement here.
+@
+
+@ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Low level implementation}
 
 A low level version of the state machine need only three LUTs.
 <<ll uartrx state machine module>>=
@@ -467,7 +496,8 @@ module uartrx_m
    );
    genvar        i;
    wire [7:0]    c_sh;
-
+@ 
+<<ll uartrx module>>=               
    uartrxsm_m rxsm(// Inputs
                    .lastbit( q[0] ),
                    /*AUTOINST*/);
@@ -867,9 +897,16 @@ A top level module is needed for synthetis.
  UART -- txpin ->| |--|>o--[x] PIO03_07
                  >_|
  */
-
+@ 
+Unconfirmed: It seems that yosys has an error that mean that the
+signal at the top lever, connected input pins, (these instantiated by
+[[SB_IO]]) must be named as input pins only.
+<<../src/icestickuart.v>>=
 module top
-  ( inout PIO3_08,PIO3_07,PIO1_14,PIO1_02,GBIN6
+//  ( inout PIO3_08,PIO3_07,PIO1_14,PIO1_02,GBIN6
+//    );
+  ( input PIO3_08, GBIN6,
+    output PIO3_07, PIO1_14, PIO1_02
     );
    wire [7:0] d;
    wire       clk,cte1,rxpinmeta1,c_rxpinmeta1,rxpin;
@@ -961,9 +998,10 @@ Device Utilization Summary
     IOs and GBIOs               :	5/96
     PLLs                        :	0/1
 \end{lstlisting}
+@
 This was when compiling with Symplify. Design resouce usage is
 theoretically:
-
+@
 \begin{tabular}{rl}
 32 & Uart proper\\
 4  & Predivider\\
@@ -973,7 +1011,7 @@ theoretically:
 \end{tabular}
 
 \noindent{}This matches the real result.
-
+@
 \subsection*{Compilation results -- Synplify, high level}
 The same excercise for the high-level implementation:
 \begin{lstlisting}
@@ -996,15 +1034,7 @@ Device Utilization Summary after Packing
     IOs and GBIOs               :	5/96
     PLLs                        :	0/1
 
-
-I2088: Phase 3, elapsed time : 0.2 (sec)
-
-Phase 4
-I2088: Phase 4, elapsed time : 0.1 (sec)
-
-Phase 5
-I2088: Phase 5, elapsed time : 0.0 (sec)
-
+:::
 Phase 6
 I2088: Phase 6, elapsed time : 12.9 (sec)
 

@@ -1,0 +1,72 @@
+[*]
+[*] GTKWave Analyzer v3.3.34 (w)1999-2012 BSI
+[*] Wed Jun  1 14:51:37 2016
+[*]
+[dumpfile] "/home/bnossum/GITSTUFF/GIT/uart_ice40/tst.lxt"
+[dumpfile_mtime] "Wed Jun  1 13:07:15 2016"
+[dumpfile_size] 578807
+[savefile] "/home/bnossum/GITSTUFF/GIT/uart_ice40/1sim.gtkw"
+[timestart] 0
+[size] 1920 1052
+[pos] -1 -29
+*-14.996439 91782 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] tst.
+[treeopen] tst.dut_rx.
+[treeopen] tst.dut_tx.
+[treeopen] tst.dut_tx.prediv_i.
+[sst_width] 223
+[signals_width] 384
+[sst_expanded] 1
+[sst_vpaned_height] 656
+@28
+tst.base_clk[0]
+tst.tx_clk[0]
+tst.load[0]
+@22
+tst.dut_tx.d[7:0]
+@28
+tst.dut_tx.bitx8ce[0]
+@22
+tst.d[7:0]
+@28
+tst.dut_tx.txbusy[0]
+tst.dut_tx.txpin[0]
+tst.dut_tx.uarttx_i.loadORtxce[0]
+@22
+tst.dut_tx.uarttx_i.a[9:0]
+@8028
+tst.dut_rx.rxtxdiv_i.tnt[2:0]
+@20000
+-
+@200
+-
+-
+-
+@28
+tst.rx_clk[0]
+tst.dut_rx.bitx8ce[0]
+@2024
+^1 /home/bnossum/GITSTUFF/GIT/uart_ice40/../../../../../tmp/../home/bnossum/GITSTUFF/GIT/uart_ice40/../../../../../tmp/../home/bnossum/GITSTUFF/GIT/uart_ice40/gktxlat.txt
+tst.dut_rx.rxst[1:0]
+@28
+tst.dut_rx.rxpin[0]
+tst.dut_rx.bytercvd[0]
+@23
+tst.dut_rx.uartrx_i.v[7:0]
+@22
+tst.dut_rx.q[7:0]
+@28
+tst.dut_rx.rst4[0]
+tst.dut_rx.rxce[0]
+@c08028
+tst.dut_rx.rxtxdiv_i.cnt[2:0]
+@28
+(0)tst.dut_rx.rxtxdiv_i.cnt[2:0]
+(1)tst.dut_rx.rxtxdiv_i.cnt[2:0]
+(2)tst.dut_rx.rxtxdiv_i.cnt[2:0]
+@1401200
+-group_end
+@20000
+-
+[pattern_trace] 1
+[pattern_trace] 0
