@@ -3,8 +3,9 @@
 # tools for the Lattice ICE40HX1K-STICK-EVN eval board (aka the "iCEstick")
 #
 
+SRCDIR = ../src/
 TARGET = uart_ice40
-SOURCES = icestick_uart.v uart.v
+SOURCES = $(SRCDIR)icestick_uart.v $(SRCDIR)uart.v
 CONSTRAINTS = top_pcf_sbt.pcf
 
 
