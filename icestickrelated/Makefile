@@ -5,7 +5,7 @@
 
 SRCDIR = ../src/
 TARGET = uart_ice40
-SOURCES = $(SRCDIR)icestick_uart.v $(SRCDIR)uart.v
+SOURCES = $(SRCDIR)icestickuart.v $(SRCDIR)uartICE40.v
 CONSTRAINTS = top_pcf_sbt.pcf
 
 

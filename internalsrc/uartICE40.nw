@@ -31,7 +31,7 @@ the results of this project. The rest of the files are just there to
 verify that those two files are correct. The files [[uartICE40]] and
 [[uartICE40hl]] should be functionally identical. While [[uartICE40]]
 is written using primitives of the iCE40 architecture, the
-corrsponding ``high-level'' [[uartICE40hl]] is syntetized from
+corresponding ``high-level'' [[uartICE40hl]] is syntetized from
 standard Verilog. Motivation for two different implementations is
 simply that it is cumbersome to understand a low level implementation
 that relies on explicitly instantiated LUTs.
@@ -873,7 +873,9 @@ Low-level code & 16-times oversampling & [[bitxce]] active one of 8 cycles\\
 \hline\end{tabular}
 @ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{ICEstick}
-A top level module is needed for synthetis.
+A top level module is needed for a rudimentary synthetis. This design
+implement an usart in loopback. Several of the LEDs of the ICEstick is
+not connected, and will flicker.
 <<../src/icestickuart.v>>=
 /* Top level that just instantiates a UART in loopback mode in an icestick.
  * Assumtions: 12M clock. 115200 bps. 8N1 format.
@@ -1064,8 +1066,8 @@ buffer is empty.
 
 \chapter{Conclusion}
 The low level implementation uses 32 logicCells, while the high level
-implementation uses 39 logicCells. This is a lot of effort (and near
-unreadable code) for a meagre saving of 7 logiCells.
+implementation uses 39 logicCells. This is a lot of effort (and user
+unfriendly code) for a meagre saving of 7 logiCells.
 If I had been able to write a good high-level module from the very
 start, a lot of effort had been saved. However, the high-level module
 was made {\emph{after}} the low-level module, and reflects the design

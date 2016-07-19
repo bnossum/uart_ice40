@@ -143,7 +143,6 @@ module uartrx_m
    );
    genvar        i;
    wire [7:0]    c_sh;
-
    uartrxsm_m rxsm(// Inputs
                    .lastbit( q[0] ),
                    /*AUTOINST*/
