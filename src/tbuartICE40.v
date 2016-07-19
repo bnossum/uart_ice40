@@ -1,4 +1,3 @@
-
 /*              
 MIT License
 
@@ -81,23 +80,32 @@ module tst;
          d <= char2;
       end
       if ( ( tx_cyclecounter >= 100 + 2*8*8*10*(1+`SUBDIV16) &&
-             tx_cyclecounter <= 103 + 2*8*8*10*(1+`SUBDIV16) ) ||
-           ( tx_cyclecounter >= 100 + 4*8*8*10*(1+`SUBDIV16) - 64*(1+`SUBDIV16) &&
-             tx_cyclecounter <= 100 + 4*8*8*10*(1+`SUBDIV16) + 64*(1+`SUBDIV16) + 64 ) )
-         glitchline <= 1'b1;
+             tx_cyclecounter <= 103 + 2*8*8*10*(1+`SUBDIV16) ) 
+           || ( tx_cyclecounter >= 100 + 4*8*8*10*(1+`SUBDIV16) 
+                - 64*(1+`SUBDIV16) &&
+                tx_cyclecounter <= 100 + 4*8*8*10*(1+`SUBDIV16) 
+                + 64*(1+`SUBDIV16) + 2*64 ) )
+        glitchline <= 1'b1;
       else
-         glitchline <= 1'b0;
+        glitchline <= 1'b0;
       if ( tx_cyclecounter == 100 + 2*8*8*10*(1+`SUBDIV16) 
-           + 4*8*(1+`SUBDIV16) ) begin
+           + 4*8*(1+`SUBDIV16) ||
+           tx_cyclecounter >= 100 + 4*8*8*10*(1+`SUBDIV16) 
+           + 64*(1+`SUBDIV16) + 2*64 )
+        begin
            check_rxst1 <= 1;
            if ( rxst != 2'b00 ) // Encoding of HUNT is 2'b00.
-              begin
-                 $display( "False start bit not rejected" );
-                 $finish;
-              end
-      end else begin
-         check_rxst1 <= 0;
-      end     
+             begin
+                if (tx_cyclecounter == 100 + 2*8*8*10*(1+`SUBDIV16) 
+                    + 4*8*(1+`SUBDIV16))
+                  $display( "False start bit not rejected" );
+                else
+                  $display( "Something wrong at frame error" );
+                $finish;
+             end
+        end else begin
+           check_rxst1 <= 0;
+        end     
    end
    always @(posedge rx_clk) begin
       bytercvd_dly1 <= bytercvd;

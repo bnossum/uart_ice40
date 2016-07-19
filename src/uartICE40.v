@@ -1,6 +1,5 @@
 /* A small simple asynchronous transmitter/receiver
    For documentation see the wiki pages.  */
-
 /*              
 MIT License
 
@@ -24,7 +23,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 module uartICE40
   # (parameter SUBDIV16 = 0, //  Examine rx line 16 or 8 times per bit
      ADJUSTSAMPLEPOINT=0     //  See documentation
@@ -37,9 +36,7 @@ module uartICE40
         output       txpin, //   Connect to INVERTED transmit pin of uart
         output       txbusy, //  Status of transmit. When high do not load
         output       bytercvd, //Status receive. True 1 clock cycle only
-`ifdef SIMULATION
         output [1:0] rxst, //    Testbench need access to receive state machine
-`endif        
         output [7:0] q //        Received byte from serial receive/byte buffer
         );
    /*AUTOWIRE*/
@@ -79,7 +76,7 @@ module uartICE40
       .rxpin				(rxpin),
       .rxst				(rxst[1:0]));
 endmodule
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 module uarttx_m
   (
    input       clk,load,loadORtxce,
@@ -116,7 +113,7 @@ module uarttx_m
    pp_i( .O(c_pp), .I3(cy[10]), .I2(a[0]), .I1(load), .I0(txpin));
    SB_DFFE pp_r( .Q(txpin), .C(clk), .E(loadORtxce), .D(c_pp) );
 endmodule
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 module uartrxsm_m
   (input        clk,rxce,rxpin,lastbit,
    output       bytercvd,
@@ -133,7 +130,7 @@ module uartrxsm_m
    SB_LUT4 #(.LUT_INIT(16'h0080))
    bytercvd_i( .O(bytercvd), .I3(rxst[1]), .I2(rxst[0]), .I1(rxpin), .I0(rxce));
 endmodule
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 module uartrx_m
   (
    input        clk,rxce,rxpin,
@@ -163,7 +160,7 @@ module uartrx_m
       end
    endgenerate
 endmodule
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 module rxtxdiv_m
   #( parameter ADJUSTSAMPLEPOINT = 0, SUBDIV16 = 0)
    (input       clk,bitxce,load,rxpin,
@@ -211,8 +208,6 @@ module rxtxdiv_m
               (.O(rst4), .I3(rxst[1]),     .I2(1'b0),.I1(bitxce), .I0(rxst[0]));
             SB_CARRY i_andcy
               (.CO(rxcy[j+2]),.CI(rxcy[j+1]),.I1(1'b0),.I0(bitxce));
-//            SB_LUT4 #(.LUT_INIT(16'hfc30)) i_rxce
-//              (.O(c_rxce), .I3(rxcy[j+2]),.I2(rxpin),.I1(rxst[1]),.I0(rxst[0]));
             SB_LUT4 #(.LUT_INIT(16'hfe30)) i_rxce
               (.O(c_rxce), .I3(rxcy[j+2]),.I2(rxpin),.I1(rxst[1]),.I0(rxst[0]));
             SB_DFF regrxce( .Q(rxce), .C(clk), .D(c_rxce));

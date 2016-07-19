@@ -2,7 +2,6 @@
  * Assumtions: 12M clock. 115200 bps. 8N1 format.
  * Note: Needs retesting on hardware after code reorganization.
  */
-
 /*              
 MIT License
 

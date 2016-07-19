@@ -1,6 +1,5 @@
 /* High level version of a small simple asynchronous transmitter/receiver
    For documentation see the wiki pages. */
-
 /*              
 MIT License
 
@@ -24,7 +23,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 module uartICE40
   # (parameter SUBDIV16 = 0, //  Examine rx line 16 or 8 times per bit
      ADJUSTSAMPLEPOINT=0     //  See documentation
@@ -37,9 +36,7 @@ module uartICE40
         output       txpin, //   Connect to INVERTED transmit pin of uart
         output       txbusy, //  Status of transmit. When high do not load
         output       bytercvd, //Status receive. True 1 clock cycle only
-`ifdef SIMULATION
         output [1:0] rxst, //    Testbench need access to receive state machine
-`endif        
         output [7:0] q //        Received byte from serial receive/byte buffer
         );
    /*AUTOWIRE*/
@@ -79,7 +76,7 @@ module uartICE40
       .rxpin				(rxpin),
       .rxst				(rxst[1:0]));
 endmodule
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 module uarttx_m
   (input       clk,load,loadORtxce,
    input [7:0] d,
@@ -96,7 +93,7 @@ module uarttx_m
         txpin  <= (load & txpin) | (!load & |a[9:1] & a[0]);
      end
 endmodule
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 module uartrxsm_m
   # ( parameter HUNT = 2'b00, GRCE = 2'b01, ARMD = 2'b10, RECV = 2'b11 )
    (input            clk,rxce,rxpin,lastbit,
@@ -127,7 +124,7 @@ module uartrxsm_m
      rxst <= nxt;
    assign bytercvd = (rxst == GRCE) && rxpin && rxce;
 endmodule
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 module uartrx_m
   # (parameter HUNT = 2'b00, GRCE = 2'b01, ARMD = 2'b10, RECV = 2'b11 )
    (
@@ -154,7 +151,7 @@ module uartrx_m
      if ( rxce )
        q <= (rxst == ARMD) ? 8'h80 : (rxst == RECV) ? {rxpin,q[7:1]} : q;
 endmodule
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 module rxtxdiv_m
   # (parameter HUNT = 2'b00, GRCE = 2'b01, ARMD = 2'b10, RECV = 2'b11,
      SUBDIV16 = 0, ADJUSTSAMPLEPOINT = 0
@@ -175,8 +172,6 @@ module rxtxdiv_m
          txcnt <= txcnt + 1;
          rxcnt <= rxst == HUNT ? rstval : (rxcnt+1);
       end
-//      rxce <= (((rxst == ARMD) | (rxst == RECV)) & (&rxcnt & bitxce) ) 
-//        | ((rxst == HUNT | rxst == GRCE) & rxpin);
       rxce <= ((rxst != HUNT) & (&rxcnt & bitxce) ) 
         | ((rxst == HUNT | rxst == GRCE) & rxpin);
    end      

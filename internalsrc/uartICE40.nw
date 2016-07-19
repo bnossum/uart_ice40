@@ -65,9 +65,7 @@ module uartICE40
         output       txpin, //   Connect to INVERTED transmit pin of uart
         output       txbusy, //  Status of transmit. When high do not load
         output       bytercvd, //Status receive. True 1 clock cycle only
-`ifdef SIMULATION
         output [1:0] rxst, //    Testbench need access to receive state machine
-`endif        
         output [7:0] q //        Received byte from serial receive/byte buffer
         );
 @ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%                
@@ -84,6 +82,10 @@ programmers that do not use emacs.
    rxtxdiv_i
      (/*AUTOINST*/);
 endmodule
+@ %
+To use uartICE40 in a project, only the interface above really need to
+be respected. Unless you want to know how it's innards work, you can
+stop reading now.
 @ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Transmit module}
 A uart transmitter is very simple. Basically we load a shift register
@@ -438,7 +440,7 @@ several ways to handle this situation.
 \item We can change how we detect the start of a start bit, and
   demand a high to low transition on the receive line.
 @
-\item we can go to a state [[GRCE]] after sampling the last data bit,
+\item We can go to a state [[GRCE]] after sampling the last data bit,
   and change how we generate [[rxce]]. If we generate [[rxce]] each
   clock cycle we are in state [[GRCE]] and monitor the receive line,
   we can go to state [[HUNT]] when we see a transition on the receive
@@ -446,8 +448,11 @@ several ways to handle this situation.
 \end{itemize}
 @
 
-The last two alternatives are probably equivalent, and we implement
-the ultimate alternative.  After the last data bit has been sampled,
+We do the last, with an added twist -- [[rxce]] will only be high when
+we are in state [[HUNT]] if [[rxpin]] is high. This implies that as
+long as a faulty stop bit lies low, we will not get to state [[ARMD]].
+
+After the last data bit has been sampled,
 the state machine goes to [[GRCE]]. The bitclock divider unit know
 when the receive state machine is in [[GRCE]], and if it sees a high
 data bit, it will give a [[rxce]], this will then lead to a quicker
@@ -460,7 +465,8 @@ its tracks again.
 A possible disadvantage is that the [[rxpin]]
 will be accessed in two consequtive clock cycles just when a stop bit
 starts (in case d[7] was low), and on a noisy line this may then give
-a false start bit. There is perhaps room for improvement here.
+a false start bit. If this becomes an identified problem, we should
+implement a digital low-pass filter in front of the uart.
 @
 
 @ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -547,8 +553,6 @@ module rxtxdiv_m
          txcnt <= txcnt + 1;
          rxcnt <= rxst == HUNT ? rstval : (rxcnt+1);
       end
-//      rxce <= (((rxst == ARMD) | (rxst == RECV)) & (&rxcnt & bitxce) ) 
-//        | ((rxst == HUNT | rxst == GRCE) & rxpin);
       rxce <= ((rxst != HUNT) & (&rxcnt & bitxce) ) 
         | ((rxst == HUNT | rxst == GRCE) & rxpin);
    end      
@@ -836,28 +840,37 @@ At a certain time, glitch the line to introduce a false start bit. We
 also let the line be low to introduce an erronous frame bit.
 <<../src/tbuartICE40.v>>=
       if ( ( tx_cyclecounter >= 100 + 2*8*8*10*(1+`SUBDIV16) &&
-             tx_cyclecounter <= 103 + 2*8*8*10*(1+`SUBDIV16) ) ||
-           ( tx_cyclecounter >= 100 + 4*8*8*10*(1+`SUBDIV16) - 64*(1+`SUBDIV16) &&
-             tx_cyclecounter <= 100 + 4*8*8*10*(1+`SUBDIV16) + 64*(1+`SUBDIV16) + 64 ) )
-         glitchline <= 1'b1;
+             tx_cyclecounter <= 103 + 2*8*8*10*(1+`SUBDIV16) ) 
+           || ( tx_cyclecounter >= 100 + 4*8*8*10*(1+`SUBDIV16) 
+                - 64*(1+`SUBDIV16) &&
+                tx_cyclecounter <= 100 + 4*8*8*10*(1+`SUBDIV16) 
+                + 64*(1+`SUBDIV16) + 2*64 ) )
+        glitchline <= 1'b1;
       else
-         glitchline <= 1'b0;
+        glitchline <= 1'b0;
 @ %
 A rather weak test to see that the receive unit is in state HUNT
 after rejecting a false start bit. We check this in the tx clock
-domain.
+domain. A similarly weak test to see that we end up in HUNT after rejecting a byte.
 <<../src/tbuartICE40.v>>=
       if ( tx_cyclecounter == 100 + 2*8*8*10*(1+`SUBDIV16) 
-           + 4*8*(1+`SUBDIV16) ) begin
+           + 4*8*(1+`SUBDIV16) ||
+           tx_cyclecounter >= 100 + 4*8*8*10*(1+`SUBDIV16) 
+           + 64*(1+`SUBDIV16) + 2*64 )
+        begin
            check_rxst1 <= 1;
            if ( rxst != 2'b00 ) // Encoding of HUNT is 2'b00.
-              begin
-                 $display( "False start bit not rejected" );
-                 $finish;
-              end
-      end else begin
-         check_rxst1 <= 0;
-      end     
+             begin
+                if (tx_cyclecounter == 100 + 2*8*8*10*(1+`SUBDIV16) 
+                    + 4*8*(1+`SUBDIV16))
+                  $display( "False start bit not rejected" );
+                else
+                  $display( "Something wrong at frame error" );
+                $finish;
+             end
+        end else begin
+           check_rxst1 <= 0;
+        end     
    end
 @ %
 Examine if we have received something:
@@ -950,15 +963,15 @@ environment. The testbench above could be used as a starting point.
 8 variants are tested. Only a few are really well tested, more work,
 but not now. 
 
-\noindent\begin{tabular}{@{}lll@{}}\hline
-High-level code & 8-times oversampling & [[bitxce]] active each cycle\\
-High-level code & 8-times oversampling & [[bitxce]] active one of 8 cycles\\
-High-level code & 16-times oversampling & [[bitxce]] active each cycle\\
-High-level code & 16-times oversampling & [[bitxce]] active one of 8 cycles\\
-Low-level code & 8-times oversampling & [[bitxce]] active each cycle\\
-Low-level code & 8-times oversampling & [[bitxce]] active one of 8 cycles\\
-Low-level code & 16-times oversampling & [[bitxce]] active each cycle\\
-Low-level code & 16-times oversampling & [[bitxce]] active one of 8 cycles\\
+\noindent\begin{tabular}{@{}llll@{}}\hline
+tst00.ltx & High-level code & 8-times oversampling & [[bitxce]] active one of 8 cycles\\
+tst01.ltx & High-level code & 8-times oversampling & [[bitxce]] active each cycle\\
+tst10.ltx & High-level code & 16-times oversampling & [[bitxce]] active one of 8 cycles\\
+tst11.ltx & High-level code & 16-times oversampling & [[bitxce]] active each cycle\\
+ltst00.ltx & Low-level code & 8-times oversampling & [[bitxce]] active one of 8 cycles\\
+ltst01.ltx & Low-level code & 8-times oversampling & [[bitxce]] active each cycle\\
+ltst10.ltx & Low-level code & 16-times oversampling & [[bitxce]] active one of 8 cycles\\
+ltst11.ltx & Low-level code & 16-times oversampling & [[bitxce]] active each cycle\\
 \hline\end{tabular}
 @ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{ICEstick}
@@ -1104,30 +1117,42 @@ theoretically:
 \noindent{}This matches the real result.
 @
 \subsection*{Compilation results -- Synplify, high level}
-The same excercise for the high-level implementation:
+The same excercise for the high-level implementation, copy-paste of
+pieces of ``placer.log'':
 \begin{lstlisting}
-Design Statistics after Packing
-    Number of LUTs      	:	46
+Input Design Statistics
+    Number of LUTs      	:	37
     Number of DFFs      	:	34
     Number of Carrys    	:	0
+    Number of RAMs      	:	0
+    Number of ROMs      	:	0
+    Number of IOs       	:	4
+    Number of GBIOs     	:	1
+    Number of GBs       	:	0
+    Number of WarmBoot  	:	0
+    Number of PLLs      	:	0
 
-Device Utilization Summary after Packing
-    Sequential LogicCells
-        LUT and DFF      	:	34
-        LUT, DFF and CARRY	:	0
-    Combinational LogicCells
-        Only LUT         	:	12
-        CARRY Only       	:	0
-        LUT with CARRY   	:	0
-    LogicCells                  :	46/1280
-    PLBs                        :	7/160
-    BRAMs                       :	0/16
-    IOs and GBIOs               :	5/96
-    PLLs                        :	0/1
 
-:::
-Phase 6
-I2088: Phase 6, elapsed time : 12.9 (sec)
+Phase 1
+I2077: Start design legalization
+
+Design Legalization Statistics
+    Number of feedthru LUTs inserted to legalize input of DFFs     	:	8
+    Number of feedthru LUTs inserted for LUTs driving multiple DFFs	:	0
+    Number of LUTs replicated for LUTs driving multiple DFFs       	:	1
+    Number of feedthru LUTs inserted to legalize output of CARRYs  	:	0
+    Number of feedthru LUTs inserted to legalize global signals    	:	0
+    Number of feedthru CARRYs inserted to legalize input of CARRYs 	:	0
+    Number of inserted LUTs to Legalize IOs with PIN_TYPE= 01xxxx  	:	0
+    Number of inserted LUTs to Legalize IOs with PIN_TYPE= 10xxxx  	:	0
+    Number of inserted LUTs to Legalize IOs with PIN_TYPE= 11xxxx  	:	0
+    Total LUTs inserted                                            	:	9
+    Total CARRYs inserted                                          	:	0
+
+
+I2078: Design legalization is completed successfully
+
+..snip..
 
 Final Design Statistics
     Number of LUTs      	:	46
@@ -1143,7 +1168,7 @@ Final Design Statistics
 
 Device Utilization Summary
     LogicCells                  :	46/1280
-    PLBs                        :	8/160
+    PLBs                        :	7/160
     BRAMs                       :	0/16
     IOs and GBIOs               :	5/96
     PLLs                        :	0/1
@@ -1168,9 +1193,8 @@ asynchronous receiver/transmitter specifically written for iCE40
 FPGAs.
 
 <<notindoc:commentline>>=
- ///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 <<notindoc:MIT Licence>>=
-
 /*              
 MIT License
 
