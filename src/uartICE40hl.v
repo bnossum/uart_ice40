@@ -37,14 +37,15 @@ module uartICE40
         output       txpin, //   Connect to INVERTED transmit pin of uart
         output       txbusy, //  Status of transmit. When high do not load
         output       bytercvd, //Status receive. True 1 clock cycle only
+`ifdef SIMULATION
+        output [1:0] rxst, //    Testbench need access to receive state machine
+`endif        
         output [7:0] q //        Received byte from serial receive/byte buffer
         );
    /*AUTOWIRE*/
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
    wire			loadORtxce;		// From rxtxdiv_i of rxtxdiv_m.v
-   wire			rst4;			// From rxtxdiv_i of rxtxdiv_m.v
    wire			rxce;			// From rxtxdiv_i of rxtxdiv_m.v
-   wire [1:0]		rxst;			// From uartrx_i of uartrx_m.v
    // End of automatics
    uarttx_m uarttx_i (/*AUTOINST*/
 		      // Outputs
@@ -70,7 +71,6 @@ module uartICE40
      (/*AUTOINST*/
       // Outputs
       .loadORtxce			(loadORtxce),
-      .rst4				(rst4),
       .rxce				(rxce),
       // Inputs
       .clk				(clk),
@@ -161,7 +161,7 @@ module rxtxdiv_m
      )
    (input       clk,bitxce,load,rxpin,
     input [1:0] rxst,
-    output      loadORtxce,rst4,
+    output      loadORtxce,
     output reg  rxce
     );
    localparam   rstval = SUBDIV16 ? (ADJUSTSAMPLEPOINT ? 4'b1001 : 4'b1000) :
@@ -173,13 +173,14 @@ module rxtxdiv_m
    always @(posedge clk) begin
       if ( bitxce ) begin
          txcnt <= txcnt + 1;
-         rxcnt <= rst4 ? rstval : (rxcnt+1);
+         rxcnt <= rxst == HUNT ? rstval : (rxcnt+1);
       end
-      rxce <= (((rxst == ARMD) | (rxst == RECV)) & (&rxcnt & bitxce) ) 
+//      rxce <= (((rxst == ARMD) | (rxst == RECV)) & (&rxcnt & bitxce) ) 
+//        | ((rxst == HUNT | rxst == GRCE) & rxpin);
+      rxce <= ((rxst != HUNT) & (&rxcnt & bitxce) ) 
         | ((rxst == HUNT | rxst == GRCE) & rxpin);
    end      
    assign loadORtxce = (&txcnt & bitxce) | load;
-   assign rst4 = rxst == HUNT;
 endmodule
  // Local Variables:
  // verilog-library-directories:("." "./fromrefdesign/" )

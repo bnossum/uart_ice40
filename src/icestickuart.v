@@ -56,6 +56,7 @@ module top
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
    wire			bytercvd;		// From uart of uartICE40.v
    wire [7:0]		q;			// From uart of uartICE40.v
+   wire [1:0]		rxst;			// From uart of uartICE40.v
    wire			txbusy;			// From uart of uartICE40.v
    wire			txpin;			// From uart of uartICE40.v
    // End of automatics
@@ -113,6 +114,7 @@ module top
       .txpin				(txpin),
       .txbusy				(txbusy),
       .bytercvd				(bytercvd),
+      .rxst				(rxst[1:0]),
       .q				(q[7:0]),
       // Inputs
       .clk				(clk),

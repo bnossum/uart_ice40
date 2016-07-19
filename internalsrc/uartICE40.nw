@@ -65,6 +65,9 @@ module uartICE40
         output       txpin, //   Connect to INVERTED transmit pin of uart
         output       txbusy, //  Status of transmit. When high do not load
         output       bytercvd, //Status receive. True 1 clock cycle only
+`ifdef SIMULATION
+        output [1:0] rxst, //    Testbench need access to receive state machine
+`endif        
         output [7:0] q //        Received byte from serial receive/byte buffer
         );
 @ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%                
@@ -517,8 +520,6 @@ An important input to the uart is the [[bitxce clock]]. It is used to
 increment a free-running 3 or 4 bit counter destined for the transmit
 module. It is also used to increment a 3 or 4 bit resettable counter
 destined for the receive module.
-The receive module also need a reset signal, it is placed in this
-module to save a LUT in the low level implementation. 
 
 When the transmission rate of the uart is close to clk/8 (or clk/16),
 we reset the rxce counter to 5 (or 9) rather than to 4 (or 8). This
@@ -534,7 +535,7 @@ module rxtxdiv_m
      )
    (input       clk,bitxce,load,rxpin,
     input [1:0] rxst,
-    output      loadORtxce,rst4,
+    output      loadORtxce,
     output reg  rxce
     );
    localparam   rstval = SUBDIV16 ? (ADJUSTSAMPLEPOINT ? 4'b1001 : 4'b1000) :
@@ -544,13 +545,14 @@ module rxtxdiv_m
    always @(posedge clk) begin
       if ( bitxce ) begin
          txcnt <= txcnt + 1;
-         rxcnt <= rst4 ? rstval : (rxcnt+1);
+         rxcnt <= rxst == HUNT ? rstval : (rxcnt+1);
       end
-      rxce <= (((rxst == ARMD) | (rxst == RECV)) & (&rxcnt & bitxce) ) 
+//      rxce <= (((rxst == ARMD) | (rxst == RECV)) & (&rxcnt & bitxce) ) 
+//        | ((rxst == HUNT | rxst == GRCE) & rxpin);
+      rxce <= ((rxst != HUNT) & (&rxcnt & bitxce) ) 
         | ((rxst == HUNT | rxst == GRCE) & rxpin);
    end      
    assign loadORtxce = (&txcnt & bitxce) | load;
-   assign rst4 = rxst == HUNT;
 endmodule
 <<notindoc:hl uart counters module sim>>=
 `ifdef SIMULATION
@@ -560,13 +562,48 @@ endmodule
 \section{Low level implementation}
 A sketch of the implementation (in 9 or 11 logicCells) is seen in figure
 \ref{fig:ll:counters}. 
+%
+% 0000
+% 0001
+% 0010 
+% 0011 
+% 0100   1
+% 0101   1
+% 0110
+% 0111
+% 1000 1
+% 1001 1
+% 1010 1
+% 1011 1
+% 1100   1
+% 1101   1
+% 1110 1
+% 1111 1 
+
+%
+% 0000 hunt 0
+% 0001 grce 0 0
+% 0010 armd   0
+% 0011 recv   0
+% 0100 hunt 1
+% 0101 grce 1 0
+% 0110 armd   0
+% 0111 recv   0
+% 1000 hunt 0
+% 1001 grce 0 1
+% 1010 armd   1
+% 1011 recv   1
+% 1100 hunt 1
+% 1101 grce 1 1
+% 1110 armd   1
+% 1111 recv   1  FE30
 \begin{figure}
 \begin{lstlisting}
                     ____               
       rxstate[0] --| I0 |  __        
-      rxstate[1] --| I1 |-|  |- rxce = ((ARMD | RECV) & rxcy & bitxce) |   
+      rxstate[1] --| I1 |-|  |- rxce = (rxcy & bitxce & (!HUNT) ) |   
       rxpin -------| I2 | >__|          (GRCE | HUNT) & rxpin)
-             +-----|_I3_|       Note, rxstate[0] not really needed. Remove       
+             +-----|_I3_|       
              |
              | rxcy & bitxce    "(receive count overflow, or rst4) & bitxce" 
            /cy\                                      
@@ -628,12 +665,12 @@ module rxtxdiv_m
   #( parameter ADJUSTSAMPLEPOINT = 0, SUBDIV16 = 0)
    (input       clk,bitxce,load,rxpin,
     input [1:0] rxst,
-    output      loadORtxce,rxce,rst4
+    output      loadORtxce,rxce
     );
    localparam rstval_lsb = ADJUSTSAMPLEPOINT ? 16'haffa : 16'h0550;
    localparam LOOPLIM = SUBDIV16 ? 4 : 3;
    wire [LOOPLIM+1:0] cy,rxcy;
-   wire               c_rxce;
+   wire               c_rxce,rst4;
    wire [LOOPLIM-1:0] c_txcnt,txcnt,c_rxcnt,rxcnt;
    genvar             j;
                
@@ -671,7 +708,7 @@ module rxtxdiv_m
               (.O(rst4), .I3(rxst[1]),     .I2(1'b0),.I1(bitxce), .I0(rxst[0]));
             SB_CARRY i_andcy
               (.CO(rxcy[j+2]),.CI(rxcy[j+1]),.I1(1'b0),.I0(bitxce));
-            SB_LUT4 #(.LUT_INIT(16'hfc30)) i_rxce
+            SB_LUT4 #(.LUT_INIT(16'hfe30)) i_rxce
               (.O(c_rxce), .I3(rxcy[j+2]),.I2(rxpin),.I1(rxst[1]),.I0(rxst[0]));
             SB_DFF regrxce( .Q(rxce), .C(clk), .D(c_rxce));
          end
@@ -713,7 +750,20 @@ Total size is 12+11+9 = 32 logicCells when we oversample 8 times, and
 A previous implementation of the uart generated the x8 (or x16) bit
 clock internal to the module. This complicated simulation. Now that
 the important [[bitxce]] input is external to the uart, testing is
-simplified.
+simplified. 
+
+\section{What do we test?}
+Two instances of [[uartICE40]] are used, one for tx and one for rx.
+Transmission of a byte with lsb set to 0, and transmission of a byte
+with lsb set to 1 is tested first. Then test recovery of the receive
+unit in case of a glitch (false startbit). Finally we test that a byte
+where the frame bit is missing is rejected.
+
+We do the tests both for a constantly active [[txce]]/[[rxce]] and for
+[[txce]]/[[rxce]] active one in 8 cycles. We do this for both the high
+level, and the low level code.
+
+\section{Test bench proper}
 <<../src/tbuartICE40.v>>=
 <<notindoc:MIT Licence>>
 module tst;
@@ -725,10 +775,12 @@ module tst;
    reg        base_clk;
    reg        rx_clk;
    reg        tx_clk;
-   reg [2:0] bitxce_tx_cnt;
-   reg [2:0] bitxce_rx_cnt;
+   reg [2:0]  bitxce_tx_cnt;
+   reg [2:0]  bitxce_rx_cnt;
+   reg        glitchline,check_rxst1;
    localparam char1 = 8'hc1, char2 = 8'h4e;   
-   localparam SIMTOCY = (1+`SUBDIV16)*4000,RXCLKSTART = 100;
+   localparam SIMTOCY = 100 + 2*8*8*8*10*(1+`SUBDIV16);
+   localparam RXCLKSTART = 100;
    localparam subdiv16 = `SUBDIV16; // From makefile              
 @ %
 We want to instantiate two uarts, one for transmit and one for
@@ -744,6 +796,7 @@ by defining a base clock, and do some initiation:
       d <= 0;      tx_clk <= 0;    simtocy = SIMTOCY;   bitxce_rx_cnt <= 0;
       load <= 0;   rx_clk <= 0;    cyclecounter <= 0;   tx_cyclecounter <= 0;
       seenB <= 0;  base_clk <= 0;  bitxce_tx_cnt <= 0;
+      check_rxst1 <= 0;            glitchline <= 0; 
    end
 @ %
 We should have a result in not too many cycles:
@@ -753,6 +806,8 @@ We should have a result in not too many cycles:
       if ( cyclecounter > SIMTOCY ) begin
          if ( simtocy == SIMTOCY )
            $display( "Simulation went off the rails" );
+         else
+           $display( "Success" );
          $finish;
       end
       tx_clk <= ~tx_clk;
@@ -760,20 +815,50 @@ We should have a result in not too many cycles:
         rx_clk <= ~rx_clk;
    end
 @ %
-Feed the transmitting uart
+Feed the transmitting uart. 
 <<../src/tbuartICE40.v>>=
    always @(posedge tx_clk) begin
       tx_cyclecounter <= tx_cyclecounter + 1;
       load <= ( tx_cyclecounter == 100   || 
-                tx_cyclecounter == 100 + 8*8*10*(1+`SUBDIV16) )
+                tx_cyclecounter == 100 +   8*8*10*(1+`SUBDIV16) ||
+                tx_cyclecounter == 100 + 3*8*8*10*(1+`SUBDIV16) )
         ? 1'b1 : 1'b0;
+@ %
+Clumsily present characters to the transmit unit
+<<../src/tbuartICE40.v>>=
       if ( tx_cyclecounter == 99 ) begin
          d <= char1;
       end else if ( tx_cyclecounter == 150 ) begin
          d <= char2;
       end
+@ %
+At a certain time, glitch the line to introduce a false start bit. We
+also let the line be low to introduce an erronous frame bit.
+<<../src/tbuartICE40.v>>=
+      if ( ( tx_cyclecounter >= 100 + 2*8*8*10*(1+`SUBDIV16) &&
+             tx_cyclecounter <= 103 + 2*8*8*10*(1+`SUBDIV16) ) ||
+           ( tx_cyclecounter >= 100 + 4*8*8*10*(1+`SUBDIV16) - 64*(1+`SUBDIV16) &&
+             tx_cyclecounter <= 100 + 4*8*8*10*(1+`SUBDIV16) + 64*(1+`SUBDIV16) + 64 ) )
+         glitchline <= 1'b1;
+      else
+         glitchline <= 1'b0;
+@ %
+A rather weak test to see that the receive unit is in state HUNT
+after rejecting a false start bit. We check this in the tx clock
+domain.
+<<../src/tbuartICE40.v>>=
+      if ( tx_cyclecounter == 100 + 2*8*8*10*(1+`SUBDIV16) 
+           + 4*8*(1+`SUBDIV16) ) begin
+           check_rxst1 <= 1;
+           if ( rxst != 2'b00 ) // Encoding of HUNT is 2'b00.
+              begin
+                 $display( "False start bit not rejected" );
+                 $finish;
+              end
+      end else begin
+         check_rxst1 <= 0;
+      end     
    end
-   
 @ %
 Examine if we have received something:
 <<../src/tbuartICE40.v>>=
@@ -785,8 +870,7 @@ Examine if we have received something:
                $display( "Something wrong2" );
                simtocy <= cyclecounter+400;
             end else begin              
-               $display( "Success" );
-               simtocy <= cyclecounter+400;
+               simtocy <= simtocy-1;
             end
          end else begin
             if ( q != char1 ) begin
@@ -804,6 +888,7 @@ For the transmitter:
 <<../src/tbuartICE40.v>>=
    wire dummy_txpin, dummy_txbusy, dummy_bytercvd;
    wire bitxce_rx, bitxce_tx, dummy_rxpin;
+   wire [1:0] dummy_rxst;              
    wire [7:0] dummy_q;
    localparam adjsamplept = `BITLAX;
 
@@ -813,6 +898,7 @@ For the transmitter:
    dut_tx
      (// Outputs
       .bytercvd(dummy_bytercvd),
+      .rxst(dummy_rxst),
       .q                                (dummy_q[7:0]),
       // Inputs
       .rxpin                            (dummy_rxpin),
@@ -835,10 +921,12 @@ For the receiver:
       .d (0),
       /*AUTOINST*/);
 @ %
+I also want to simulate a false start bit. This I do by suitably
+glitch the line at the top level.
 The testbench uses a bit-serial loopback. Pads not simulated, so txpin
-inverted here.
+inverted here. 
 <<../src/tbuartICE40.v>>=
-   assign rxpin = ~txpin;
+   assign rxpin = ~txpin & ~glitchline;
 @ %
 Provide the 8 or 16 times bitrate clocks:
 <<../src/tbuartICE40.v>>=
@@ -859,7 +947,8 @@ users of uartICE40 to do their own testing, in their own
 environment. The testbench above could be used as a starting point.
 
 \subsection*{Tested}
-8 variants are tested:
+8 variants are tested. Only a few are really well tested, more work,
+but not now. 
 
 \noindent\begin{tabular}{@{}lll@{}}\hline
 High-level code & 8-times oversampling & [[bitxce]] active each cycle\\

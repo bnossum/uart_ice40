@@ -37,14 +37,15 @@ module uartICE40
         output       txpin, //   Connect to INVERTED transmit pin of uart
         output       txbusy, //  Status of transmit. When high do not load
         output       bytercvd, //Status receive. True 1 clock cycle only
+`ifdef SIMULATION
+        output [1:0] rxst, //    Testbench need access to receive state machine
+`endif        
         output [7:0] q //        Received byte from serial receive/byte buffer
         );
    /*AUTOWIRE*/
    // Beginning of automatic wires (for undeclared instantiated-module outputs)
    wire			loadORtxce;		// From rxtxdiv_i of rxtxdiv_m.v
-   wire			rst4;			// From rxtxdiv_i of rxtxdiv_m.v
    wire			rxce;			// From rxtxdiv_i of rxtxdiv_m.v
-   wire [1:0]		rxst;			// From uartrx_i of uartrx_m.v
    // End of automatics
    uarttx_m uarttx_i (/*AUTOINST*/
 		      // Outputs
@@ -71,7 +72,6 @@ module uartICE40
       // Outputs
       .loadORtxce			(loadORtxce),
       .rxce				(rxce),
-      .rst4				(rst4),
       // Inputs
       .clk				(clk),
       .bitxce				(bitxce),
@@ -168,12 +168,12 @@ module rxtxdiv_m
   #( parameter ADJUSTSAMPLEPOINT = 0, SUBDIV16 = 0)
    (input       clk,bitxce,load,rxpin,
     input [1:0] rxst,
-    output      loadORtxce,rxce,rst4
+    output      loadORtxce,rxce
     );
    localparam rstval_lsb = ADJUSTSAMPLEPOINT ? 16'haffa : 16'h0550;
    localparam LOOPLIM = SUBDIV16 ? 4 : 3;
    wire [LOOPLIM+1:0] cy,rxcy;
-   wire               c_rxce;
+   wire               c_rxce,rst4;
    wire [LOOPLIM-1:0] c_txcnt,txcnt,c_rxcnt,rxcnt;
    genvar             j;
                
@@ -211,7 +211,9 @@ module rxtxdiv_m
               (.O(rst4), .I3(rxst[1]),     .I2(1'b0),.I1(bitxce), .I0(rxst[0]));
             SB_CARRY i_andcy
               (.CO(rxcy[j+2]),.CI(rxcy[j+1]),.I1(1'b0),.I0(bitxce));
-            SB_LUT4 #(.LUT_INIT(16'hfc30)) i_rxce
+//            SB_LUT4 #(.LUT_INIT(16'hfc30)) i_rxce
+//              (.O(c_rxce), .I3(rxcy[j+2]),.I2(rxpin),.I1(rxst[1]),.I0(rxst[0]));
+            SB_LUT4 #(.LUT_INIT(16'hfe30)) i_rxce
               (.O(c_rxce), .I3(rxcy[j+2]),.I2(rxpin),.I1(rxst[1]),.I0(rxst[0]));
             SB_DFF regrxce( .Q(rxce), .C(clk), .D(c_rxce));
          end
