@@ -26,8 +26,8 @@ SOFTWARE.
 ////////////////////////////////////////////////////////////////////////////////
 module uartICE40
   # (parameter SUBDIV16 = 0, //  Examine rx line 16 or 8 times per bit
-     ADJUSTSAMPLEPOINT=0     //  See documentation
-     ) (
+     ADJUSTSAMPLEPOINT = 0   //  Set to 1 when bitrate*8/clk < 2 (SUBDIV16 = 0),
+     ) (                     //  or bitrate*16/clk < 2 (for SUBDIV16 = 1).
         input        clk, //     System clock
         input        bitxce, //  High 1 clock cycle 8 or 16 times per bit
         input        load, //    Time to transmit a byte. Load transmit buffer

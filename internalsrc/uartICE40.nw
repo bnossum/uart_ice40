@@ -49,14 +49,13 @@ extends to \pageref{bnLastpage}\ pages.
 
 @ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%                
 \chapter{Top level}
-Regardless of whether the implementation is high or low level,
 [[uartICE40]] has the following interface:
 <<module head>>=
 <<notindoc:commentline>>
 module uartICE40
   # (parameter SUBDIV16 = 0, //  Examine rx line 16 or 8 times per bit
-     ADJUSTSAMPLEPOINT=0     //  See documentation
-     ) (
+     ADJUSTSAMPLEPOINT = 0   //  Set to 1 when bitrate*8/clk < 2 (SUBDIV16 = 0),
+     ) (                     //  or bitrate*16/clk < 2 (for SUBDIV16 = 1).
         input        clk, //     System clock
         input        bitxce, //  High 1 clock cycle 8 or 16 times per bit
         input        load, //    Time to transmit a byte. Load transmit buffer
@@ -340,8 +339,9 @@ we need no counter for the number of received bits.
 \subsection*{High level receive state machine}\label{sec:hl:rxst}
 
 The states of the state machine is encoded as parameters to
-avoid polluting the name space. When [[rxce]] is active (8 or 16 times
-per bit), the state machine may change state.
+avoid polluting the name space. When [[rxce]] is active (in general 8 or 16 times
+per bit), the state machine may change state. But note that [[rxce]]
+is active every cycle when the state machin is in states [[GRCE]] and [[HUNT]].
 <<hl uartrx state machine module>>=
 <<notindoc:commentline>>
 module uartrxsm_m
@@ -1003,8 +1003,8 @@ not connected, and will flicker.
  */
 @ 
 Unconfirmed: It seems that yosys has an error that mean that the
-signal at the top lever, connected input pins, (these instantiated by
-[[SB_IO]]) must be named as input pins only.
+signal at the top lever, connected input signal, (these instantiated
+as input pins by [[SB_IO]]) must be named as input only.
 <<../src/icestickuart.v>>=
 module top
 //  ( inout PIO3_08,PIO3_07,PIO1_14,PIO1_02,GBIN6
@@ -1014,55 +1014,50 @@ module top
     );
    wire [7:0] d;
    wire       clk,cte1,rxpinmeta1,c_rxpinmeta1,rxpin;
-   reg [3:0]  bitxcecnt;
+   reg [4:0]  bitxcecnt;
    /*AUTOWIRE*/
-
-   // One LUT consumed to get a constant 1.
-   // May get constant 1 from an unbonded pad instead.
+@ %
+One LUT is consumed to get a constant 1. A trick to save a LUT would
+be to get  constant 1 from an unbonded pad instead.
+<<../src/icestickuart.v>>=
    assign cte1 = 1'b1; 
-
+@ %
+Then follows the pin instantiations
+<<../src/icestickuart.v>>=
    // Clock pin
    SB_GB_IO clockpin
-     ( .PACKAGE_PIN(GBIN6),
-       .GLOBAL_BUFFER_OUTPUT(clk));
+     ( .PACKAGE_PIN(GBIN6),   .GLOBAL_BUFFER_OUTPUT(clk));
    
    // Transmit pin
    SB_IO #( .PIN_TYPE(6'b011111)) // OUTPUT_REGISTERED_INVERTED/INPUT_LATCH
-   IO_tx
-     ( .PACKAGE_PIN(PIO3_07),
-       .OUTPUT_CLK(clk),
-       .D_OUT_0(txpin) );
+   IO_tx     ( .PACKAGE_PIN(PIO3_07), .OUTPUT_CLK(clk), .D_OUT_0(txpin) );
 
    // txbusy to LED0
    SB_IO #( .PIN_TYPE(6'b010111)) // OUTPUT_REGISTERED/INPUT_LATCH
-   IO_txbusy
-     ( .PACKAGE_PIN(PIO1_14),
-       .OUTPUT_CLK(clk),
-       .D_OUT_0(txbusy) );
+   IO_txbusy ( .PACKAGE_PIN(PIO1_14), .OUTPUT_CLK(clk), .D_OUT_0(txbusy) );
 
    // bitxce to J2 pin 1 for debugging
    SB_IO #( .PIN_TYPE(6'b010111)) // OUTPUT_REGISTERED/INPUT_LATCH
-   IO_bitxce
-     ( .PACKAGE_PIN(PIO1_02),
-       .OUTPUT_CLK(clk),
-       .D_OUT_0(bitxce) );
+   IO_bitxce ( .PACKAGE_PIN(PIO1_02), .OUTPUT_CLK(clk), .D_OUT_0(bitxce) );
 
    // Receive pin
    SB_IO #( .PIN_TYPE(6'b000000)) // NO_OUTPUT/INPUT_REGISTERED
-   IO_rx
-     ( .PACKAGE_PIN(PIO3_08),
-       .INPUT_CLK(clk),
-       .D_IN_0(rxpinmeta1) );
-   // Metastability. I explicitly instantiate a LUT,
+   IO_rx     ( .PACKAGE_PIN(PIO3_08), .INPUT_CLK(clk),  .D_IN_0(rxpinmeta1) );
+@ %
+Metastability reduction. I explicitly instantiate a LUT:
+<<../src/icestickuart.v>>=
    SB_LUT4 #( .LUT_INIT(16'haaaa))
    cmb( .O(c_rxpinmeta1), .I3(1'b0), .I2(1'b0), .I1(1'b0), .I0(rxpinmeta1));
    SB_DFF metareg( .Q(rxpin), .C(clk), .D(c_rxpinmeta1));
-
-   // Prescaler : 12000000/(115200*8) = 13.02, so make a counter
-   // 4 5 6 7 8 9 a b c d e f 10
+@ %$
+We assume to have a 12~MHz clock, and want a bitrate of 115200. Hence
+we need a prescaler $\frac{12000000}{115200*8} = 13.02$
+The easiest way I can think of, is a 5-bit counter that counts the
+sequence \fbox{4 5 6 7 8 9 0xa 0xb 0xc 0xd 0xe 0xf 0x10}. 
+<<../src/icestickuart.v>>=
    always @(posedge clk)
-      bitxcecnt <= bitxcecnt[3] ? 4'h4 : bitxcecnt+4'h1;
-   assign bitxce = bitxcecnt[3];              
+      bitxcecnt <= bitxcecnt[4] ? 5'h4 : bitxcecnt+5'h1;
+   assign bitxce = bitxcecnt[4];              
    // The module proper              
    uartICE40 uart
      (/*AUTOINST*/);
@@ -1079,14 +1074,28 @@ endmodule
 // End:
 
 @ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\subsection*{Compilation results -- Synplify, low level}
+\section{Compilation results}
+\subsection{Synplify, low level}
 When using the low level implementation, the following excerpt from
 the ``placer.log'' file show the size:
 \begin{lstlisting}
-Final Design Statistics
+Input Design Statistics
     Number of LUTs      	:	38
-    Number of DFFs      	:	34
-    Number of Carrys    	:	18
+    Number of DFFs      	:	35
+    Number of Carrys    	:	21
+    Number of RAMs      	:	0
+    Number of ROMs      	:	0
+    Number of IOs       	:	4
+    Number of GBIOs     	:	1
+    Number of GBs       	:	0
+    Number of WarmBoot  	:	0
+    Number of PLLs      	:	0
+
+..snip..
+Final Design Statistics
+    Number of LUTs      	:	39
+    Number of DFFs      	:	35
+    Number of Carrys    	:	21
     Number of RAMs      	:	0
     Number of ROMs      	:	0
     Number of IOs       	:	4
@@ -1096,34 +1105,38 @@ Final Design Statistics
     Number of PLLs      	:	0
 
 Device Utilization Summary
-    LogicCells                  :	39/1280
+    LogicCells                  :	41/1280
     PLBs                        :	9/160
     BRAMs                       :	0/16
     IOs and GBIOs               :	5/96
     PLLs                        :	0/1
 \end{lstlisting}
 @
+\bigskip
 This was when compiling with Symplify. Design resouce usage is
 theoretically:
 @
 \begin{tabular}{rl}
 32 & Uart proper\\
-4  & Predivider\\
+5  & Predivider\\
 1  & Removal of metastability from rxpin\\
 1  & Generation of constant 1'b1\\\hline
-38 & Total\\
+39 & Total\\
 \end{tabular}
 
 \noindent{}This matches the real result.
 @
-\subsection*{Compilation results -- Synplify, high level}
+\subsection{Synplify, high level}
 The same excercise for the high-level implementation, copy-paste of
 pieces of ``placer.log'':
 \begin{lstlisting}
+I2053: Starting placement of the design
+=============================================================
+
 Input Design Statistics
-    Number of LUTs      	:	37
-    Number of DFFs      	:	34
-    Number of Carrys    	:	0
+    Number of LUTs      	:	38
+    Number of DFFs      	:	35
+    Number of Carrys    	:	3
     Number of RAMs      	:	0
     Number of ROMs      	:	0
     Number of IOs       	:	4
@@ -1148,16 +1161,12 @@ Design Legalization Statistics
     Number of inserted LUTs to Legalize IOs with PIN_TYPE= 11xxxx  	:	0
     Total LUTs inserted                                            	:	9
     Total CARRYs inserted                                          	:	0
-
-
-I2078: Design legalization is completed successfully
-
 ..snip..
 
 Final Design Statistics
-    Number of LUTs      	:	46
-    Number of DFFs      	:	34
-    Number of Carrys    	:	0
+    Number of LUTs      	:	47
+    Number of DFFs      	:	35
+    Number of Carrys    	:	3
     Number of RAMs      	:	0
     Number of ROMs      	:	0
     Number of IOs       	:	4
@@ -1167,14 +1176,15 @@ Final Design Statistics
     Number of PLLs      	:	0
 
 Device Utilization Summary
-    LogicCells                  :	46/1280
-    PLBs                        :	7/160
+    LogicCells                  :	48/1280
+    PLBs                        :	8/160
     BRAMs                       :	0/16
     IOs and GBIOs               :	5/96
     PLLs                        :	0/1
+I2076: Placer run-time: 11.4 sec.
 \end{lstlisting}
 
-\noindent{}Note that no carry-chain resources are used above. The
+\noindent{}Note that few carry-chain resources are used above. The
 high-level implementation use LUTs to find out if the transmit
 buffer is empty. 
 
