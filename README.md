@@ -5,5 +5,5 @@ Simulation has been performed successfully. The uart has been on hardware, but n
 
 My intention is to use this small project to learn the github flow, while contributing something potentially useful. Also, the project will be used with my upcoming < 250 logicCells controller for the iCE40 series FPGAs.
 
-Uart format is startbit, 8 data bits, 1 stop bit. The bitrate is given by a 8x or 16x bit clock, see [the main documentation file](../tree/master/doc/uartICE40.pdf).
+Uart format is startbit, 8 data bits, 1 stop bit. The bitrate is given by a 8x or 16x bit clock, see [the main documentation file](doc/uartICE40.pdf).
 
